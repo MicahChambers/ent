@@ -1,35 +1,78 @@
 // launch::async vs launch::deferred
 #include <iostream>     // std::cout
-#include <future>       // std::async, std::future, std::launch
-#include <chrono>       // std::chrono::milliseconds
-#include <thread>       // std::this_thread::sleep_for
+#include <cstdlib>       
+#include <vector>       
 
-void print_ten (char c, int ms) {
-  for (int i=0; i<10; ++i) {
-    std::this_thread::sleep_for (std::chrono::milliseconds(ms));
-    std::cout << c;
-  }
-}
+#include <future>
+#include <thread>
+#include <chrono>
 
-int runjob(
+using std::future;
+using std::async;
+using std::vector;
+using std::endl;
+using std::string;
+using std::cerr;
 
-int main ()
+int main (int argc, char** argv)
 {
-  std::cout << "with launch::async:\n";
-  std::future<void> foo = std::async (std::launch::async,print_ten,'*',100);
-  std::future<void> bar = std::async (std::launch::async,print_ten,'@',200);
-  // async "get" (wait for foo and bar to be ready):
-  foo.get();
-  bar.get();
-  std::cout << "\n\n";
+	printf ("Checking if processor is available...");
+	if(system(NULL)) {
+		cerr << "It is!" << endl;
+	} else {
+		cerr << "Error your operating system is not supported" << endl;
+		exit(EXIT_FAILURE);
+	}
 
-  std::cout << "with launch::deferred:\n";
-  foo = std::async (std::launch::deferred,print_ten,'*',100);
-  bar = std::async (std::launch::deferred,print_ten,'@',200);
-  // deferred "get" (perform the actual calls):
-  foo.get();
-  bar.get();
-  std::cout << '\n';
+	vector<string> jobs;
+	vector<int> jobstat;
 
-  return 0;
+	vector<future<int>> running;
+	for(int ii = 1 ; ii < argc; ii++) {
+		cerr << "Launching: \"" << argv[ii] << "\"" << endl;
+		running.push_back(async(std::launch::async, system, argv[ii]));
+		jobs.push_back(argv[ii]);
+		jobstat.push_back(std::numeric_limits<int>::min());
+	}
+
+	auto tick = std::chrono::milliseconds(100);
+	bool alldone = false;
+
+	/* 
+	 * Continue Polling Until All the Jobs are Done. Since we don't know the order
+	 * they will finish in.
+	 */
+	while(!alldone) {
+		alldone = true;
+
+		/* 
+		 * Check on each job
+		 */
+		for(unsigned int ii = 0; ii != running.size(); ii++) {
+
+			// job done already so ignore
+			if(jobstat[ii] != std::numeric_limits<int>::min())
+				continue;
+
+			// check to see if jobs is done
+			auto status = running[ii].wait_for(tick);
+
+			// if its done, add return to jobstat
+			if(status == std::future_status::ready) {
+				jobstat[ii] = running[ii].get();
+				cerr << "Job: \"" << jobs[ii] << "\" Finished with status: " 
+					<< jobstat[ii] << endl;
+			} else {
+				alldone = false;
+			}
+		}
+	}
+
+	cerr << "All done. Summary:" << endl;
+	for(unsigned int ii = 0; ii != running.size(); ii++) {
+		cerr << "\tJob : \"" << jobs[ii] << "\" Finished with status: " 
+			<< jobstat[ii] << endl;
+	}
+
+	return 0;
 }
