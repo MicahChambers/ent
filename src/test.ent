@@ -22,25 +22,46 @@
 #	flirt -in fsubj1 -ref fsubj2 -out fsubj1_in_fsubj2 -tfm trans.mat
 #
 #note wildcard should resolve to a single input
-base=/ifs/faculty/shattuck/micahc/narr_schizo
+base=/datadir
 prefix={base}/{subject}/pipe
 subject=10107,10343,1
 fmri=fmri_year1,fmri_year2
 dti=dti_year1,dti_year2
+
+# 
 
 #Comma indicates two inputs will be provided for everything in the 0 branch
 #foreach t1 in subject:
 #    foreach f in fmri:
 #      flirt -in t1 -ref f -out t1_in_fmri -tfm trans.mat
 #	   flirt -init trans.mat -inv f -out fmri_in_t1 
-0.0::[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
+#
+# ({base}*{fmri}*{subject})  - generates every possible combination:
+# (/datadir,fmri_year1,10107),
+# (/datadir,fmri_year1,10343),
+# (/datadir,fmri_year1,1)
+# (/datadir,fmri_year2,10107),
+# (/datadir,fmri_year2,10343),
+# (/datadir,fmri_year2,1)
+#
+# then this produces the following list of arguments: 
+#	[(arg0_to_proc0,arg1_to_proc0), (arg0_to_proc1,arg1_to_proc1) ... ]
+#
+#[(/datadir/10107/fmri_year1*.nii.gz,	/datadir/10107/SAGMPRAGE*.nii.gz),
+# (/datadir/10343/fmri_year1*.nii.gz,	/datadir/10343/SAGMPRAGE*.nii.gz),
+# (/datadir/1/fmri_year1*.nii.gz,		/datadir/1/SAGMPRAGE*.nii.gz),
+# (/datadir/10107/fmri_year2*.nii.gz,	/datadir/10107/SAGMPRAGE*.nii.gz),
+# (/datadir/10343/fmri_year2*.nii.gz,	/datadir/10343/SAGMPRAGE*.nii.gz),
+# (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/SAGMPRAGE*.nii.gz)]
+#
+0.i::[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
 0.1::[t1_in_fmri.nii.gz,trans.mat] = flirt -in {0} -ref {1} -out [t1_in_fmri.nii.gz] -tfm [trans.mat]
 0.2::[fmri_in_t1.nii.gz] = flirt -init {1} -ref {0.0:1} -inv -out [fmri_in_t1.nii.gz]
 
 #foreach t1 in subject:
 #    foreach d in dti:
 #      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
-1.0::[{base}/{subject}/{dti}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
+1.i::[{base}/{subject}/{dti}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
 1.1::[trans.mat] = flirt -in t1 -ref d -out t1_in_fmri -tfm [trans.mat]
 
 #combine corresponding elements from two lists
@@ -48,11 +69,65 @@ dti=dti_year1,dti_year2
 #foreach subject:
 #	foreach f,d in zip(fmri,dti):
 #		divide -i f -i d -o ratio
-2.0::({base}/{subject}/{fmri}*.nii.gz:{base}/{subject}/{dti}*.nii.gz) = ({base}*{subject}*({fmri},{dti}))
+#
+#({base}*{subject}*({fmri},{dti})) expands to:
+# (/datadir,10107,fmri_year1,dti_year1),
+# (/datadir,10343,fmri_year1,dti_year1),
+# (/datadir,1,fmri_year1,dti_year1),
+# (/datadir,10107,fmri_year1,dti_year1),
+# (/datadir,10343,fmri_year1,dti_year1),
+# (/datadir,1,fmri_year1,dti_year1)
+#
+# then the outputs (arguments) list will be
+#[(/datadir/10107/fmri_year1*.nii.gz,	/datadir/10107/dti_year1*.nii.gz),
+# (/datadir/10343/fmri_year1*.nii.gz,	/datadir/10343/dti_year1*.nii.gz),
+# (/datadir/1/fmri_year1*.nii.gz,		/datadir/1/dti_year1*.nii.gz),
+# (/datadir/10107/fmri_year2*.nii.gz,	/datadir/10107/dti_year2*.nii.gz),
+# (/datadir/10343/fmri_year2*.nii.gz,	/datadir/10343/dti_year2*.nii.gz),
+# (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/dti_year2*.nii.gz)]
+
+2.i::[{base}/{subject}/{fmri}*.nii.gz,{base}/{subject}/{dti}*.nii.gz] = ({base}*{subject}*({fmri},{dti}))
 2.1::[ratio.nii.gz] = divide -i {0} -i {1} -o [ratio.nii.gz]
 
 ##register between corresponding fMRI across subjects (collapse subjects)
 #foreach fmri:
 #	flirt -in fsubj1 -ref fsubj2 -out fsubj1_in_fsubj2 -tfm trans.mat
-2.0::[{base}/{subject}/{fmri}*.nii.gz%{subject}] = (({base}*{fmri})%{subject})
-2.1::[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {0} -i {1} -o [ratio.nii.gz]
+#
+# ({base}*{fmri}*{subject})  - generates every possible combination:
+# (/datadir,fmri_year1,10107),
+# (/datadir,fmri_year1,10343),
+# (/datadir,fmri_year1,1)
+# (/datadir,fmri_year2,10107),
+# (/datadir,fmri_year2,10343),
+# (/datadir,fmri_year2,1)
+#
+# Then the term in the output array: '{base}/{subject}/{fmri}*.nii.gz%{subject}'
+# expands arguments across the subjects, so the argument list for job 0 is:
+#[(/datadir,fmri_year1,10107),
+# (/datadir,fmri_year1,10343),
+# (/datadir,fmri_year1,1)]
+#
+# for job 1 (the second) it is:
+#[(/datadir,fmri_year2,10107),
+# (/datadir,fmri_year2,10343),
+# (/datadir,fmri_year2,1)]
+#
+# even though 6 variants are generated, only 2 jobs are created
+
+3.i::[{base}/{subject}/{fmri}*.nii.gz%{subject}] = ({base}*{fmri}*{subject})
+3.1::[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {0} -i {1} -o [ratio.nii.gz]
+
+#### FUTURE ############
+## create a lot of outputs
+#foreach subj:
+#	fslsplit fmri_0 basename -t
+# This would generate a runtime-determined number of outputs
+5.i::[{base}/{subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
+5.1::[odir/*] = fslsplit {0} [odir/*] basename -t
+5.2::[fmri] = fslmerge -t [fmri] {} #{5.1:} could also be used as input 
+5.3::[fmri_t0t5] = fslmerge -t [fmri] {5.1:0-5} # just get the first 5 volumes
+
+# takes the first 5 inputs from 5.1, prepends -add then puts them on the CLI
+# produces fslmaths -add sutch that it produces:
+# $ fslmaths fmri0.nii.gz -add fmri1.nii.gz -add fmri2.nii.gz -add fmri3.nii.gz sum.nii.gz
+5.3::[sum] = fslmaths {5.1:0} {5.1:1-3!-add } [sum] 
