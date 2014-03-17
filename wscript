@@ -1,6 +1,7 @@
 #!/bin/env python3
 from waflib.Utils import subprocess
 import os
+import sys
 from waflib import Options, Node, Build, Configure
 import re
 
@@ -42,6 +43,10 @@ def configure(conf):
         conf.env.CXXFLAGS.extend(['-O3', '-march=nocona'])
 
     conf.check(header_name='stdio.h', features='cxx cxxprogram', mandatory=True)
+
+    if sys.platform != 'win32':
+        if not conf.env['LIB_PTHREAD']:
+            conf.check_cxx(lib = 'pthread')
 
 def options(ctx):
     ctx.load('compiler_cxx')

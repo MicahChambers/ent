@@ -28,7 +28,70 @@ subject=10107,10343,1
 fmri=fmri_year1,fmri_year2
 dti=dti_year1,dti_year2
 
-# 
+# Types of lines:
+#
+# Variable declaration (use ',' for an array):
+#	a=b[,c[,d...]]
+#
+# Declaration of input sources:
+#	int[.int[.int]].i::[file[,file[,...]]] = ({prov}[*,{prov}[*,{prov}]])
+#
+#		where prov are variables from variable declaration above that will be 
+#		iterated through. Provinences can be combined using either '*' or ','
+#		to determine how prov variables will be iterated through. 
+#
+#		* will use
+#			every possible combination of the two, ie: {subj}*{fmri} would generate
+#			the 6 file pairs: 
+#
+#				(10107,fmri_year1),(10107,fmri_year2),(10343,fmri_year1),
+#				(10343,fmri_year2),(1,fmri_year1),(1,fmri_year2)
+#
+#			hence the reason * is used, because the number of jobs generated is the
+#			product of the length of the input provenances. Each pair would then be
+#			used to fill in variables in the [file[,file...]] spec.
+#		
+#		, will pair up the inputs, but the variables MUST BE OF THE SAME LENGTH:
+#			therefore {subj},{fmri} is incorrect because their lengths differ, but
+#			
+#			{fmri},{dti} will generate the following:
+#			
+#			(fmri_year1,dti_year1),(fmri_year2,dti_year2)
+#		
+#		() may be used combine, but only one operator type is allowed in a set of 
+#			parenthesis.
+#
+# Declaration of a process
+#	int[.int[...]] :: [ftemp[,ftemp[...]]] = cmd {<inspec} {>outspec} [<inspec] [>outspec]
+#
+#		where 
+#
+#			ftemp is a file postfix, the job number will be prefixed to 
+#				provide a unique output
+#
+#			cmd is a command line program to run
+#
+#			{} variables are included on the command line, and will be replaced
+#				with the corresponding files
+#
+#			[] variables are implicit (ie not included on the command line)
+#
+#			inspec is of the form 'jspec:i-j@prefix' where all arguments are optional. 
+#				
+#				jspec indicates a specific job which produces the 
+#					output for the desired input, (default is the preceeding job spec)
+#
+#				i-j indicates a range of output numbers from the given jobspec, 
+#					-j may be omitted to specify a single output
+#				
+#				@prefix indicates variables to prepend to each input from i-j, so
+#					for instance {0-2@-i } would cause -i out0 -i out1 -i out2 -i 
+#					to be added to the command line where out0,out1,out2 are outputs
+#					of the previous job
+#
+#			outspec is identical in form to ftemp, and will be prepended with a 
+#				with a job identifier
+#			
 
 #Comma indicates two inputs will be provided for everything in the 0 branch
 #foreach t1 in subject:
@@ -55,14 +118,14 @@ dti=dti_year1,dti_year2
 # (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/SAGMPRAGE*.nii.gz)]
 #
 0.i::[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
-0.1::[t1_in_fmri.nii.gz,trans.mat] = flirt -in {0} -ref {1} -out [t1_in_fmri.nii.gz] -tfm [trans.mat]
-0.2::[fmri_in_t1.nii.gz] = flirt -init {1} -ref {0.0:1} -inv -out [fmri_in_t1.nii.gz]
+0.1::[t1_in_fmri.nii.gz,trans.mat] = flirt -in {<0} -ref {<1} -out {>t1_in_fmri.nii.gz} -tfm {>trans.mat}
+0.2::[fmri_in_t1.nii.gz] = flirt -init {<1} -ref {<0.0:1} -inv -out {>fmri_in_t1.nii.gz}
 
 #foreach t1 in subject:
 #    foreach d in dti:
 #      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
-1.i::[{base}/{subject}/{dti}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
-1.1::[trans.mat] = flirt -in t1 -ref d -out t1_in_fmri -tfm [trans.mat]
+1.i::[{base}/{subject}/{dti}.nii.gz,{base}/{subject}/SAGMPRAGE.nii.gz] = ({base}*{subject}*{dti})
+1.1::[trans.mat] = flirt -in {<0} -ref {<1} -out {>t1_in_fmri.nii.gz} -tfm {>out.tfm}
 
 #combine corresponding elements from two lists
 #foreach base:
@@ -87,7 +150,7 @@ dti=dti_year1,dti_year2
 # (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/dti_year2*.nii.gz)]
 
 2.i::[{base}/{subject}/{fmri}*.nii.gz,{base}/{subject}/{dti}*.nii.gz] = ({base}*{subject}*({fmri},{dti}))
-2.1::[ratio.nii.gz] = divide -i {0} -i {1} -o [ratio.nii.gz]
+2.1::[ratio.nii.gz] = divide -i {<0} -i {<1} -o {>ratio.nii.gz}
 
 ##register between corresponding fMRI across subjects (collapse subjects)
 #foreach fmri:
@@ -115,19 +178,19 @@ dti=dti_year1,dti_year2
 # even though 6 variants are generated, only 2 jobs are created
 
 3.i::[{base}/{subject}/{fmri}*.nii.gz%{subject}] = ({base}*{fmri}*{subject})
-3.1::[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {0} -i {1} -o [ratio.nii.gz]
+3.1::[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
 
-#### FUTURE ############
-## create a lot of outputs
-#foreach subj:
-#	fslsplit fmri_0 basename -t
-# This would generate a runtime-determined number of outputs
-5.i::[{base}/{subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
-5.1::[odir/*] = fslsplit {0} [odir/*] basename -t
-5.2::[fmri] = fslmerge -t [fmri] {} #{5.1:} could also be used as input 
-5.3::[fmri_t0t5] = fslmerge -t [fmri] {5.1:0-5} # just get the first 5 volumes
-
-# takes the first 5 inputs from 5.1, prepends -add then puts them on the CLI
-# produces fslmaths -add sutch that it produces:
-# $ fslmaths fmri0.nii.gz -add fmri1.nii.gz -add fmri2.nii.gz -add fmri3.nii.gz sum.nii.gz
-5.3::[sum] = fslmaths {5.1:0} {5.1:1-3!-add } [sum] 
+###### FUTURE ############
+#### create a lot of outputs
+###foreach subj:
+###	fslsplit fmri_0 basename -t
+### This would generate a runtime-determined number of outputs
+##5.i::[{base}/{subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
+##5.1::[odir/*] = fslsplit {0} [odir/*] basename -t
+##5.2::[fmri] = fslmerge -t [fmri] {} #{5.1:} could also be used as input 
+##5.3::[fmri_t0t5] = fslmerge -t [fmri] {5.1:0-5} # just get the first 5 volumes
+##
+### takes the first 5 inputs from 5.1, prepends -add then puts them on the CLI
+### produces fslmaths -add sutch that it produces:
+### $ fslmaths fmri0.nii.gz -add fmri1.nii.gz -add fmri2.nii.gz -add fmri3.nii.gz sum.nii.gz
+##5.3::[sum] = fslmaths {5.1:0} {5.1:1-3@-add } [sum] 

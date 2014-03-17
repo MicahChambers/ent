@@ -2,6 +2,8 @@
 #include <iostream>
 #include <fstream>
 #include <regex>
+#include <vector>
+#include <map>
 
 #include "ent.h"
 
@@ -11,6 +13,7 @@ using std::string;
 using std::ifstream;
 using std::regex;
 using std::regex_match;
+using std::map;
 
 Ent::Ent(string filename)
 {
