@@ -1,0 +1,58 @@
+#/home/micahc/tools/ent/bin/ent
+#
+# Implements the following:
+#
+## Registering each subjects fmri images to the T1 image
+#foreach t1 in subject:
+#    foreach f in fmri:
+#      flirt -in t1 -ref f -out t1_in_fmri -tfm trans.mat
+#	   flirt -init trans.mat -inv f -out fmri_in_t1 
+# 
+#foreach t1 in subject:
+#    foreach d in dti:
+#      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
+#
+#combine corresponding elements from two lists
+#foreach subject:
+#	foreach f,d in zip(fmri,dti):
+#		divide -i f -i d -o ratio
+#
+##register between corresponding fMRI across subjects (collapse subjects)
+#foreach fmri:
+#	flirt -in fsubj1 -ref fsubj2 -out fsubj1_in_fsubj2 -tfm trans.mat
+#
+#note wildcard should resolve to a single input
+base=/ifs/faculty/shattuck/micahc/narr_schizo
+prefix={base}/{subject}/pipe
+subject=10107,10343,1
+fmri=fmri_year1,fmri_year2
+dti=dti_year1,dti_year2
+
+#Comma indicates two inputs will be provided for everything in the 0 branch
+#foreach t1 in subject:
+#    foreach f in fmri:
+#      flirt -in t1 -ref f -out t1_in_fmri -tfm trans.mat
+#	   flirt -init trans.mat -inv f -out fmri_in_t1 
+0.0::[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
+0.1::[t1_in_fmri.nii.gz,trans.mat] = flirt -in {0} -ref {1} -out [t1_in_fmri.nii.gz] -tfm [trans.mat]
+0.2::[fmri_in_t1.nii.gz] = flirt -init {1} -ref {0.0:1} -inv -out [fmri_in_t1.nii.gz]
+
+#foreach t1 in subject:
+#    foreach d in dti:
+#      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
+1.0::[{base}/{subject}/{dti}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
+1.1::[trans.mat] = flirt -in t1 -ref d -out t1_in_fmri -tfm [trans.mat]
+
+#combine corresponding elements from two lists
+#foreach base:
+#foreach subject:
+#	foreach f,d in zip(fmri,dti):
+#		divide -i f -i d -o ratio
+2.0::({base}/{subject}/{fmri}*.nii.gz:{base}/{subject}/{dti}*.nii.gz) = ({base}*{subject}*({fmri},{dti}))
+2.1::[ratio.nii.gz] = divide -i {0} -i {1} -o [ratio.nii.gz]
+
+##register between corresponding fMRI across subjects (collapse subjects)
+#foreach fmri:
+#	flirt -in fsubj1 -ref fsubj2 -out fsubj1_in_fsubj2 -tfm trans.mat
+2.0::[{base}/{subject}/{fmri}*.nii.gz%{subject}] = (({base}*{fmri})%{subject})
+2.1::[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {0} -i {1} -o [ratio.nii.gz]
