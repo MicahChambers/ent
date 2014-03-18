@@ -23,18 +23,18 @@ def configure(conf):
 
     conf.env.RPATH = []
     if opts['enable_rpath'] or opts['enable_build_rpath']:
-        for pp in ['fmri', 'graph', 'libs', 'point3d', 'R']:
-            conf.env.RPATH.append(join('$ORIGIN', '..', pp))
+        conf.env.RPATH.append('$ORIGIN')
 
     if opts['enable_rpath'] or opts['enable_install_rpath']:
         conf.env.RPATH.append(abspath(join(conf.env.PREFIX, 'lib')))
 
     conf.env.DEFINES = ['AE_CPU=AE_INTEL', 'VCL_CAN_STATIC_CONST_INIT_FLOAT=0', 'VCL_CAN_STATIC_CONST_INIT_INT=0']
-    conf.env.CXXFLAGS = ['-Wall', '-std=c++11']
+    conf.env.CXXFLAGS = ['-Wall', '-std=c++11', '-stdlib=libc++']
+    conf.env.LINKFLAGS = ['-std=c++11', '-stdlib=libc++', '-lc++abi']
     if opts['profile']:
         conf.env.DEFINES.append('DEBUG=1')
         conf.env.CXXFLAGS.extend(['-Wno-unused-parameter', '-Wno-sign-compare', '-Wno-unused-local-typedefs', '-Wall', '-Wextra','-g', '-pg'])
-        conf.env.LINKFLAGS = ['-pg']
+        conf.env.LINKFLAGS.append('-pg')
     elif opts['debug']:
         conf.env.DEFINES.append('DEBUG=1')
         conf.env.CXXFLAGS.extend(['-Wno-unused-parameter', '-Wno-sign-compare', '-Wno-unused-local-typedefs', '-Wall', '-Wextra','-g'])

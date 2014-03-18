@@ -24,5 +24,7 @@ public:
 
 private:
 	std::list<std::shared_ptr<Leaf>> dag;
+
+	int m_err;
 };
 

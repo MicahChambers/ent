@@ -2,6 +2,6 @@ from os.path import join
 
 def build(bld):
     bld(name = 'tclap', export_includes = ['external/tclap/include'])
-#    bld.shlib(target = 'ent', source = 'ent.cpp', use='tclap')
-#    bld.program(target = 'ent_test', source = 'ent_test.cpp', use = 'ent')
+    bld.shlib(target = 'ent', source = 'ent.cpp', use='tclap')
+    bld.program(target = 'ent_test', source = 'ent_test.cpp', use = 'ent')
     bld.program(target = 'runjob_test', source = 'runjob_test.cpp', use='PTHREAD')
