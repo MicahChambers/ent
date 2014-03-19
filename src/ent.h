@@ -35,6 +35,12 @@ public:
 	}
 };
 
+/* 
+ * Ent Class
+ *
+ * This class is used to store the entire tree for a processing 
+ * pipeline
+ */
 class Ent
 {
 public:
@@ -45,64 +51,9 @@ public:
 		return o <<  std::endl; 
 	};
 
-	class Leaf
-	{
-		public:
-			Leaf(std::string file, unsigned int line);
-			Leaf();
-
-			// nothing yet
-			size_t getNProc();
-			const std::vector<std::string>& getArgs(size_t proc);
-
-		protected:
-			bool m_placeholder;
-			std::string m_parsefile;
-			unsigned int m_parseline;
-
-			// for each process, vector of output files
-			std::vector<std::vector<std::string>> m_outputs;
-		
-		friend Ent;
-	};
-	
-	class Input : private Leaf
-	{
-		public:
-		Input(std::string file, unsigned int line, std::string mixture, 
-				std::vector<std::string> filepatterns, const Ent* parent);
-
-		private: 
-
-		/* Metadata */
-		// [0..N-1,0..M-1] 
-		// where N is the number of permutations of the metdata, and
-		// M is the number of output files
-		//
-		// rows are permutations of metadata
-		// columns are index metadata
-		std::vector<std::vector<std::string>> m_metadata;
-		
-		// outer vector matches the m_metdata vector, inner is the
-		// corresponding files, in the order listed in the ent file
-		// rows are permutations of metadata
-		// columns are index files
-		std::vector<std::vector<std::string>> m_files; 
-		
-		// names of each of the metadata variables corresponding
-		// to the outer vector of m_outvars;
-		std::vector<std::string> m_outvars; 
-
-		std::list<std::shared_ptr<Leaf>> m_children;	//run after
-		
-		std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
-
-		// helper function that mixes metadata
-		int mixtureToMetadata(std::string file, const Ent* parent);
-
-		const Ent* m_parent;
-		friend Ent;
-	};
+	class Leaf;
+	class Input;
+	class Proc;
 
 private:
 	std::map<std::vector<int>,std::shared_ptr<Leaf>, vintComp> m_leaves;
@@ -110,5 +61,76 @@ private:
 
 //	std::vector<int> getId(std::string);
 	int m_err;
+};
+
+/*
+ * Leaf Class
+ * 
+ * This class is the base class for Proc and Input
+ */
+class Ent::Leaf
+{
+	public:
+		Leaf(std::string file, unsigned int line);
+		Leaf();
+
+		// nothing yet
+		size_t getNProc();
+		const std::vector<std::string>& getArgs(size_t proc);
+
+	protected:
+		bool m_placeholder;
+		std::string m_parsefile;
+		unsigned int m_parseline;
+
+		// for each process, vector of output files
+		std::vector<std::vector<std::string>> m_outputs;
+	
+	friend Ent;
+};
+
+/* 
+ * Input Class
+ *
+ * Parses out input and creates output files for other Proc class
+ *
+ */
+class Ent::Input : private Ent::Leaf
+{
+	public:
+	Input(std::string file, unsigned int line, std::string mixture,
+		const std::vector<std::string>& filepatterns, 
+		const std::vector<std::string>& reshapes, const Ent* parent);
+
+	private: 
+
+	/* Metadata */
+	// [0..N-1,0..M-1] 
+	// where N is the number of permutations of the metdata, and
+	// M is the number of output files
+	//
+	// rows are permutations of metadata
+	// columns are index metadata
+	std::vector<std::vector<std::string>> m_metadata;
+	
+	// outer vector matches the m_metdata vector, inner is the
+	// corresponding files, in the order listed in the ent file
+	// rows are permutations of metadata
+	// columns are index files
+	std::vector<std::vector<std::string>> m_files; 
+	
+	// names of each of the metadata variables corresponding
+	// to the outer vector of m_outvars;
+	std::vector<std::string> m_outvars; 
+
+	std::list<std::shared_ptr<Leaf>> m_children;	//run after
+	
+	std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
+
+	// helper function that mixes metadata
+	int mixtureToMetadata(std::string file, const Ent* parent);
+
+	const Ent* m_parent;
+	friend Ent;
 };
 

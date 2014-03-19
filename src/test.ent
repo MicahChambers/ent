@@ -175,7 +175,7 @@ prefix={base}/{subject}/pipe
 # (/datadir,fmri_year2,1)
 #
 # Then the term in the output array: '{base}/{subject}/{fmri}*.nii.gz%{subject}'
-# expands arguments across the subjects, so the argument list for job 0 is:
+# divides arguments by subject, so the argument list for job 0 is:
 #[(/datadir,fmri_year1,10107),
 # (/datadir,fmri_year1,10343),
 # (/datadir,fmri_year1,1)]
@@ -189,6 +189,26 @@ prefix={base}/{subject}/pipe
 
 3.0:i:[{base}/{subject}/{fmri}*.nii.gz%{subject}] = ({base}*{fmri}*{subject})
 3.1:p:[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
+
+# Instead of %, = will generate argument lists where the metadata is equal across
+# all the arguments. So
+# Then the term in the output array: '{base}/{subject}/{fmri}*.nii.gz={subject}'
+# divides arguments by subject, so the argument list for job 0 is:
+#[(/datadir,fmri_year1,10107),
+# (/datadir,fmri_year2,10107)]
+#
+# The argument list for job 1 will be:
+#[(/datadir,fmri_year1,10343),
+# (/datadir,fmri_year2,10343)]
+#
+# And the argument list for job 2 will be :
+#[(/datadir,fmri_year1,1)
+# (/datadir,fmri_year2,1)]
+#
+# Multiple tags can be applied to further affect the results, they
+# are applied in order of appearance
+4.0:i:[{base}/{subject}/{fmri}*.nii.gz={subject}] = ({base}*{fmri}*{subject})
+4.1:p:[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
 
 ###### FUTURE ############
 #### create a lot of outputs

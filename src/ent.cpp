@@ -150,14 +150,16 @@ Ent::Leaf::getNProc()
 /**********************************************************
  * Input 
  ***********************************************************/
-Ent::Input::Input(string file, unsigned int line, std::string mixture,
-		vector<string> filepatterns, const Ent* parent) 
+Ent::Input::Input(string file, unsigned int line, string mixture,
+		const vector<string>& filepatterns, const vector<string>& reshapes, 
+		const Ent* parent) 
 		: Leaf(file, line), m_parent(parent)
 {
 	if(mixtureToMetadata(mixture, parent) != 0) {
 		throw "Error parsing";
 	}
 
+#ifndef NDEBUG
 	for(auto v : m_outvars) {
 		cerr << v << '\t';
 	}
@@ -169,7 +171,26 @@ Ent::Input::Input(string file, unsigned int line, std::string mixture,
 		}
 		cerr << endl;
 	}
+#endif //NDEBUG
 
+	// todo use reshape specifiers
+	for(unsigned int ii = 0 ; ii < reshapes.size(); ii++) {
+		unsigned int which;
+		for(int jj = 0 ; jj < m_outvars.size(); jj++) {
+			if(m_outvars[jj] == reshapes[ii].substr(1)) {
+				which = jj;
+				break;
+			}
+		}
+
+		if(reshapes[ii][0] == "%") {
+
+		} else if(reshapes[ii][0] == "=") {
+			
+		}
+	}
+
+	std::smatch match; 
 	m_files.resize(m_metadata.size());
 	for(unsigned int ii = 0 ; ii < m_files.size(); ii++) {
 
@@ -183,21 +204,14 @@ Ent::Input::Input(string file, unsigned int line, std::string mixture,
 
 			// for each variable, replace variable name with metadata
 			for(unsigned int vv = 0 ; vv < m_outvars.size(); vv++) {
-				std::smatch match; 
-				string regstring = "\\{\\s*"+m_outvars[vv]+"\\s*\\}";
-				std::regex reg(regstring);
-				bool found = std::regex_search(m_files[ii][ff], match, reg);
-				if(found) {
-					cerr << match.prefix().str() << endl;
-					cerr << m_metadata[ii][vv] << endl;
-					cerr << match.suffix().str() << endl;
+				std::regex reg("\\{\\s*"+m_outvars[vv]+"\\s*\\}");
+				while(std::regex_search(m_files[ii][ff], match, reg)) {
 					m_files[ii][ff] = match.prefix().str() + m_metadata[ii][vv] + 
 						match.suffix().str();
 				}
 			}
 			cerr << m_files[ii][ff] << endl;
 		}
-
 	}
 }
 
@@ -255,8 +269,8 @@ Ent::Input::mixtureToMetadata(string spec, const Ent* parent)
 				vector<vector<string>> merged;
 
 				while(!stack.back().empty()) {
-					merged = nest(merged, stack.back().back());
-					stack.back().pop_back();
+					merged = nest(merged, stack.back().front());
+					stack.back().pop_front();
 				}
 				
 				// finally place the merged metadata on the end of the 
@@ -266,8 +280,8 @@ Ent::Input::mixtureToMetadata(string spec, const Ent* parent)
 				vector<vector<string>> merged;
 				
 				while(!stack.back().empty()) {
-					merged = zip(merged, stack.back().back(), error);
-					stack.back().pop_back();
+					merged = zip(merged, stack.back().front(), error);
+					stack.back().pop_front();
 				}
 
 				// zip can fail if the inputs aren't the same size. We make
@@ -370,7 +384,7 @@ Ent::Ent(string filename) : m_err(0)
 	const sregex_token_iterator regEnd;
 	std::smatch args;
 
-	shared_ptr<Leaf> prevleaf;
+	Leaf* prevleaf = NULL;
 
 	ifstream ifs(filename);
 	string line;
@@ -417,17 +431,19 @@ Ent::Ent(string filename) : m_err(0)
 				ret.first->second.push_back(*regIt);
 			}
 		
+		} else if(regex_match(line, args, inputRe)) {
 			/*****************************************
 			 * Input Declaration
 			 * 		match 
 			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = ({prov}[*,{prov}[*,{prov}]])
 			 *****************************************/
-		} else if(regex_match(line, args, inputRe)) {
 			// check if this is an initializing line (input files)
 #ifndef NDEBUG
 			cerr << "Input Line: " << line << "\t" << endl;
 #endif // NDEBUG
 			string sid = args[1]; //string id
+			string fnames = args[2];
+			string mixture = args[3];
 			auto ret = m_leaves.insert(pair<vector<int>,shared_ptr<Leaf>>(
 						getId(sid), NULL));
 			if(ret.second == false && !ret.first->second->m_placeholder) {
@@ -435,8 +451,21 @@ Ent::Ent(string filename) : m_err(0)
 					<< filename << ":" << linenum+1 << endl;
 			}
 
+			// remove reshape commands
+			vector<string> reshapes;
+			std::regex reg("([%=])\\s*\\{([^{]*)\\}");
+			while(std::regex_search(fnames, args, reg)) {
+				reshapes.push_back(args[1].str()+args[2].str());
+				fnames = args.prefix().str() + args.suffix().str();
+			}
+
+#ifndef NDEBUG
+			cerr << "Reshape Specifiers: " << endl;
+			for(auto vv : reshapes) 
+				cerr << "\t" <<  vv << endl;
+#endif//DEBUG
+
 			// split out output files
-			string fnames = args[2];
 			vector<string> filepatterns;
 			sregex_token_iterator regIt(fnames.cbegin(), fnames.cend(), commaRe);
 			for(; regIt != regEnd ; ++regIt) 
@@ -444,10 +473,16 @@ Ent::Ent(string filename) : m_err(0)
 
 			// create new leaf
 			auto newleaf = shared_ptr<Input>(new Input(filename, linenum+1, 
-						args[3], filepatterns, this));
+						mixture, filepatterns, reshapes, this));
 
-			prevleaf.reset(dynamic_cast<Leaf*>(newleaf.get()));
+
+			prevleaf = newleaf.get();
 		} else if(regex_match(line, args, cmdRe)) {
+			/*****************************************
+			 * Process Declaration
+			 * 		match 
+			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
+			 *****************************************/
 			// check if this is an initializing line (input files)
 			cerr << "Command Line : (matches: " << args.size() << "\t" << line << "\t" << endl;
 			for(unsigned int ii = 0 ; ii < args.size(); ii++) {
