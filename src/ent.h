@@ -2,6 +2,38 @@
 #include <memory>
 #include <future>
 #include <list>
+#include <cmath>
+#include <unordered_map>
+#include <map>
+
+struct vintComp {
+	bool operator() (const std::vector<int>& lhs, const std::vector<int>& rhs) const
+	{
+		for(unsigned int ii = 0; ii < std::min(lhs.size(), rhs.size()); ii++) {
+			if(lhs[ii] < rhs[ii])
+				return true;
+			if(lhs[ii] > rhs[ii])
+				return false;
+		}
+		
+		// if all members are identical, then whichever is shorter is lesser
+		return lhs.size() < rhs.size();
+	}
+};
+
+template<typename C>
+class Hash
+{
+public:
+	std::size_t operator()(C const& v) const 
+	{
+		std::size_t h = 0;
+		for(auto it = v.begin(); it != v.end(); it++) {
+			h = (std::hash<typename C::value_type>()(*it))^(h << 1);
+		}
+		return h;
+	}
+};
 
 class Ent
 {
@@ -15,16 +47,68 @@ public:
 
 	class Leaf
 	{
-		bool visited = false;
-		std::string cmd;				// command to be run
-		std::shared_ptr<std::thread> proc; 	// running process pointer
-		std::list<std::shared_ptr<Leaf>> parents;	//run before
-		std::list<std::shared_ptr<Leaf>> children;	//run after
+		public:
+			Leaf(std::string file, unsigned int line);
+			Leaf();
+
+			// nothing yet
+			size_t getNProc();
+			const std::vector<std::string>& getArgs(size_t proc);
+
+		protected:
+			bool m_placeholder;
+			std::string m_parsefile;
+			unsigned int m_parseline;
+
+			// for each process, vector of output files
+			std::vector<std::vector<std::string>> m_outputs;
+		
+		friend Ent;
+	};
+	
+	class Input : private Leaf
+	{
+		public:
+		Input(std::string file, unsigned int line, std::string mixture, 
+				std::vector<std::string> filepatterns, const Ent* parent);
+
+		private: 
+
+		/* Metadata */
+		// [0..N-1,0..M-1] 
+		// where N is the number of permutations of the metdata, and
+		// M is the number of output files
+		//
+		// rows are permutations of metadata
+		// columns are index metadata
+		std::vector<std::vector<std::string>> m_metadata;
+		
+		// outer vector matches the m_metdata vector, inner is the
+		// corresponding files, in the order listed in the ent file
+		// rows are permutations of metadata
+		// columns are index files
+		std::vector<std::vector<std::string>> m_files; 
+		
+		// names of each of the metadata variables corresponding
+		// to the outer vector of m_outvars;
+		std::vector<std::string> m_outvars; 
+
+		std::list<std::shared_ptr<Leaf>> m_children;	//run after
+		
+		std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
+
+		// helper function that mixes metadata
+		int mixtureToMetadata(std::string file, const Ent* parent);
+
+		const Ent* m_parent;
+		friend Ent;
 	};
 
 private:
-	std::list<std::shared_ptr<Leaf>> dag;
+	std::map<std::vector<int>,std::shared_ptr<Leaf>, vintComp> m_leaves;
+	std::map<std::string,std::list<std::string>> m_vars;
 
+//	std::vector<int> getId(std::string);
 	int m_err;
 };
 
