@@ -7,7 +7,7 @@
 #include <map>
 #include <cstdlib>
 
-#include "ent.h"
+#include "chain.h"
 
 using std::endl;
 using std::cerr;
@@ -129,20 +129,20 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
  * Leaf 
  ***********************************************************/
 
-Ent::Leaf::Leaf(string file, unsigned int line)
+Chain::Leaf::Leaf(string file, unsigned int line)
 {
 	m_placeholder = false;
 	m_parseline = line;
 	m_parsefile = file;
 }
 
-Ent::Leaf::Leaf()
+Chain::Leaf::Leaf()
 {
 	m_placeholder = true;
 }
 
 size_t 
-Ent::Leaf::getNProc()
+Chain::Leaf::getNProc()
 {
 	return m_outputs.size();
 }
@@ -150,9 +150,9 @@ Ent::Leaf::getNProc()
 /**********************************************************
  * Input 
  ***********************************************************/
-Ent::Input::Input(string file, unsigned int line, string mixture,
+Chain::Input::Input(string file, unsigned int line, string mixture,
 		const vector<string>& filepatterns, const vector<string>& reshapes, 
-		const Ent* parent) 
+		const Chain* parent) 
 		: Leaf(file, line), m_parent(parent)
 {
 	if(mixtureToMetadata(mixture, parent) != 0) {
@@ -216,7 +216,7 @@ Ent::Input::Input(string file, unsigned int line, string mixture,
 }
 
 int
-Ent::Input::mixtureToMetadata(string spec, const Ent* parent)
+Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 {
 #ifndef NDEBUG
 	cerr << "Metavar: " << spec << endl;
@@ -370,10 +370,10 @@ Ent::Input::mixtureToMetadata(string spec, const Ent* parent)
 }
 
 /**********************************************************
- * Ent
+ * Chain
  ***********************************************************/
 
-Ent::Ent(string filename) : m_err(0)
+Chain::Chain(string filename) : m_err(0)
 {
 	cerr << "Parsing: " << endl;
 	auto varRe = regex("\\s*([^:=\\s]*)\\s*=\\s*([^:=\\s]*)\\s*");

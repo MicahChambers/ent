@@ -2,7 +2,7 @@
 #include <string>
 #include <iostream>
 
-#include "ent.h"
+#include "chain.h"
 
 using std::endl;
 using std::cerr;
@@ -15,11 +15,11 @@ int main(int argc, char** argv)
 	 * Command Line 
 	 */
 	TCLAP::CmdLine cmd("This program runs a series of jobs in qsub or on the "
-			"local machine. The jobs are described by a .ent file.", ' ', __version__ );
+			"local machine. The jobs are described by a .chain file.", ' ', __version__ );
 
 	// arguments
-	TCLAP::ValueArg<std::string> a_ent("i","in","Input pipe",true,"pipe.ent","file");
-	cmd.add(a_ent);
+	TCLAP::ValueArg<std::string> a_chain("i","in","Input pipe",true,"pipe.chain","file");
+	cmd.add(a_chain);
 
 	// parse arguments
 	cmd.parse(argc, argv);
@@ -27,9 +27,9 @@ int main(int argc, char** argv)
 	/*
 	 * Main Processing
 	 */
-	auto filename = a_ent.getValue();
+	auto filename = a_chain.getValue();
 	
-	Ent tree(filename);
+	Chain tree(filename);
 
 	//cerr << tree << endl;
 

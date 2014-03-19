@@ -36,15 +36,15 @@ public:
 };
 
 /* 
- * Ent Class
+ * Chain Class
  *
  * This class is used to store the entire tree for a processing 
  * pipeline
  */
-class Ent
+class Chain
 {
 public:
-	Ent(std::string filename);
+	Chain(std::string filename);
 
 	std::ostream& operator<<(std::ostream &o) 
 	{
@@ -68,7 +68,7 @@ private:
  * 
  * This class is the base class for Proc and Input
  */
-class Ent::Leaf
+class Chain::Leaf
 {
 	public:
 		Leaf(std::string file, unsigned int line);
@@ -86,7 +86,7 @@ class Ent::Leaf
 		// for each process, vector of output files
 		std::vector<std::vector<std::string>> m_outputs;
 	
-	friend Ent;
+	friend Chain;
 };
 
 /* 
@@ -95,12 +95,12 @@ class Ent::Leaf
  * Parses out input and creates output files for other Proc class
  *
  */
-class Ent::Input : private Ent::Leaf
+class Chain::Input : private Chain::Leaf
 {
 	public:
 	Input(std::string file, unsigned int line, std::string mixture,
 		const std::vector<std::string>& filepatterns, 
-		const std::vector<std::string>& reshapes, const Ent* parent);
+		const std::vector<std::string>& reshapes, const Chain* parent);
 
 	private: 
 
@@ -128,9 +128,9 @@ class Ent::Input : private Ent::Leaf
 	std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
 
 	// helper function that mixes metadata
-	int mixtureToMetadata(std::string file, const Ent* parent);
+	int mixtureToMetadata(std::string file, const Chain* parent);
 
-	const Ent* m_parent;
-	friend Ent;
+	const Chain* m_parent;
+	friend Chain;
 };
 
