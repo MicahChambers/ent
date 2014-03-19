@@ -51,12 +51,12 @@ public:
 		return o <<  std::endl; 
 	};
 
-	class Leaf;
 	class Input;
 	class Proc;
 
 private:
-	std::map<std::vector<int>,std::shared_ptr<Leaf>, vintComp> m_leaves;
+	std::map<std::vector<int>,std::shared_ptr<Proc>, vintComp> m_procs;
+	std::map<std::vector<int>,std::shared_ptr<Input>, vintComp> m_inputs;
 	std::map<std::string,std::list<std::string>> m_vars;
 
 //	std::vector<int> getId(std::string);
@@ -71,7 +71,7 @@ private:
 class Chain::Leaf
 {
 	public:
-		Leaf(std::string file, unsigned int line);
+		Leaf(std::string file, unsigned int line, string sid);
 		Leaf();
 
 		// nothing yet
@@ -79,6 +79,7 @@ class Chain::Leaf
 		const std::vector<std::string>& getArgs(size_t proc);
 
 	protected:
+		std::vector<int> m_id;
 		bool m_placeholder;
 		std::string m_parsefile;
 		unsigned int m_parseline;
@@ -88,6 +89,52 @@ class Chain::Leaf
 	
 	friend Chain;
 };
+
+/* 
+ * Proc Class
+ *
+ * Parses out input and creates output files for other Proc class
+ *
+ */
+class Chain:: Proc : private Chain::Leaf
+{
+	public:
+	Proc(std::string file, unsigned int line, std::string mixture,
+		const std::vector<std::string>& filepatterns, 
+		const std::vector<std::string>& reshapes, const Chain* parent);
+
+	private: 
+
+	/* Metadata */
+	// [0..N-1,0..M-1] 
+	// where N is the number of permutations of the metadata, and
+	// M is the number of output files
+	//
+	// rows are permutations of metadata
+	// columns are index metadata
+	std::vector<std::vector<std::string>> m_metadata;
+	
+	// outer vector matches the m_metadata vector, inner is the
+	// corresponding files, in the order listed in the ent file
+	// rows are permutations of metadata
+	// columns are index files
+	std::vector<std::vector<std::string>> m_files; 
+	
+	// names of each of the metadata variables corresponding
+	// to the outer vector of m_outvars;
+	std::vector<std::string> m_outvars; 
+
+	std::list<std::shared_ptr<Leaf>> m_children;	//run after
+	
+	std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
+
+	// helper function that mixes metadata
+	int mixtureToMetadata(std::string file, const Chain* parent);
+
+	const Chain* m_parent;
+	friend Chain;
+};
+
 
 /* 
  * Input Class
@@ -106,14 +153,14 @@ class Chain::Input : private Chain::Leaf
 
 	/* Metadata */
 	// [0..N-1,0..M-1] 
-	// where N is the number of permutations of the metdata, and
+	// where N is the number of permutations of the metadata, and
 	// M is the number of output files
 	//
 	// rows are permutations of metadata
 	// columns are index metadata
 	std::vector<std::vector<std::string>> m_metadata;
 	
-	// outer vector matches the m_metdata vector, inner is the
+	// outer vector matches the m_metadata vector, inner is the
 	// corresponding files, in the order listed in the ent file
 	// rows are permutations of metadata
 	// columns are index files

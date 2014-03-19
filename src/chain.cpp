@@ -129,11 +129,12 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
  * Leaf 
  ***********************************************************/
 
-Chain::Leaf::Leaf(string file, unsigned int line)
+Chain::Leaf::Leaf(string file, unsigned int line, string sid)
 {
 	m_placeholder = false;
 	m_parseline = line;
 	m_parsefile = file;
+	m_id = getId(sid);
 }
 
 Chain::Leaf::Leaf()
@@ -147,49 +148,105 @@ Chain::Leaf::getNProc()
 	return m_outputs.size();
 }
 
+
+/**
+ * @brief Parses a single input variable variable {base} or {0.1:5-10}
+ * or {*base} or {*0.1:4|base}
+ *
+ * @param varname 	variable string to parse
+ * @param patterns	output patterns, expanded by {* } as necessary
+ *
+ * @return 
+ */
+int Chain::Input::parseVar(string varname, vector<string>& patterns)
+{
+// need a lookup table of eventual files, resolved or not
+}
+
+int
+Chain::Input::parseFiles(string fnames)
+{
+	auto commaRe = regex("(\\s*[^,]+\\s*)");
+	std::regex varRe("\\{\\*\\s([^{]*)\\s\\}");
+	std::smatch args;
+	int finit;	// initial location in file array
+	vector<string> filepatterns;
+
+	// split out output files
+	sregex_token_iterator fnIt(fnames.cbegin(), fnames.cend(), commaRe);
+	for(; fnIt != regEnd ; ++fnIt) {
+
+		parseVar(
+		// initial point to expand from, if necessary from {* }
+		finit = filepatterns.size();
+		filepatterns.push_back(*fnIt);
+
+		// we have a token filename, now expand  {* } variables
+		sregex_token_iterator expIt(fnIt->cbegin(), fnIt->cend(), varRe);
+		for(; expIt != regEnd ; ++expIt) {
+			auto fret = parent->m_vars.find(*expIt);
+			if(fret == parent->m_vars.end()) {
+				cerr << "Unknown Reference '" << *expIt << " in " 
+						<< m_parsefile << ":" << m_parseline << endl;
+				return -1;
+			}
+
+			// [{base}/]
+			// base=1,2
+			int sz = filepatterns.size()-finit;
+			filepatterns.resize(filepatterns.size()+sz*fret.second->size());
+
+			//  [{base}/,undefined]
+			//0 [{base}/,undefined]
+			//0 [1/,undefined]
+			for(unsigned int ii = finit; ii < sz; ii++) {
+				for(auto it = fret.second->begin(); it != fret.second->end();
+							it++) {
+					string before = fnInit->str().substr(0,expIt.first);
+					string after = fnInit->str().substr(expIt.second);
+					filepatterns[ii] = before + (*it) + after;
+				}
+
+			}
+		}
+	}
+	return 0;
+}
+
 /**********************************************************
  * Input 
  ***********************************************************/
-Chain::Input::Input(string file, unsigned int line, string mixture,
-		const vector<string>& filepatterns, const vector<string>& reshapes, 
-		const Chain* parent) 
-		: Leaf(file, line), m_parent(parent)
+
+Chain::Input::Input(string file, unsigned int line, string sid, 
+		string filepatterns, string mixture, const Chain* parent) 
+		: Leaf(file, line, sid), m_parent(parent)
 {
+	// todo determine number of arguments
+	// todo determine procs
+	if(parseFiles(filepatterns)) != 0) {
+		cerr << "Error Parsing File" << file << ":" << line << endl;
+		m_err(-1);
+		return;
+	}
+	// convert mixture
 	if(mixtureToMetadata(mixture, parent) != 0) {
-		throw "Error parsing";
+		cerr << "Error Parsing Mixture" << file << ":" << line << endl;
+		m_err(-1);
+		return;
 	}
 
 #ifndef NDEBUG
-	for(auto v : m_outvars) {
+	for(auto v : m_outvars) 
 		cerr << v << '\t';
-	}
 	cerr << endl;
-
 	for(auto v : m_metadata) {
-		for(auto v2 : v) {
+		for(auto v2 : v) 
 			cerr << v2 << '\t';
-		}
 		cerr << endl;
 	}
 #endif //NDEBUG
 
-	// todo use reshape specifiers
-	for(unsigned int ii = 0 ; ii < reshapes.size(); ii++) {
-		unsigned int which;
-		for(int jj = 0 ; jj < m_outvars.size(); jj++) {
-			if(m_outvars[jj] == reshapes[ii].substr(1)) {
-				which = jj;
-				break;
-			}
-		}
-
-		if(reshapes[ii][0] == "%") {
-
-		} else if(reshapes[ii][0] == "=") {
-			
-		}
-	}
-
+	// produce file list
 	std::smatch match; 
 	m_files.resize(m_metadata.size());
 	for(unsigned int ii = 0 ; ii < m_files.size(); ii++) {
@@ -373,35 +430,49 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
  * Chain
  ***********************************************************/
 
+/**
+ * @brief Parsing works as follows
+ *
+ * Read all input, creating nodes without resolving any {} variables
+ *
+ * Then afterward resolve {}
+ *
+ * First pass: create all nodes, resolve number of jobs and 
+ * outputs for every node, create variables
+ *
+ * Second pass: Resolve file names, linkage
+ *
+ * @param filename
+ */
 Chain::Chain(string filename) : m_err(0)
 {
 	cerr << "Parsing: " << endl;
 	auto varRe = regex("\\s*([^:=\\s]*)\\s*=\\s*([^:=\\s]*)\\s*");
 	auto commaRe = regex("(\\s*[^,]+\\s*)");
 	auto inputRe = regex("\\s*([0-9.]*)\\s*:\\s*(?:input|i)\\s*:\\s*\\[(.*)\\]\\s*=(\\s*[^\\s]+\\s*)");
-	auto cmdRe = regex("\\s*([0-9.]*)\\s*::\\s*\\[(.*)\\]\\s*=\\s*(.*)\\s*");
+	auto cmdRe = regex("\\s*([0-9.]*)\\s*:\\s*(?:proc|p)\\s*:\\s*\\[(.*)\\]\\s*=\\s*(.*)\\s*");
 	auto emptyRe = regex("\\s*");
 	const sregex_token_iterator regEnd;
 	std::smatch args;
 
-	Leaf* prevleaf = NULL;
+	vector<int> prevleaf;
 
-	ifstream ifs(filename);
 	string line;
-	std::getline(ifs,line);
 	int linenum = 0;
-	while(!ifs.eof()) {
+	ifstream ifs(filename);
+	std::getline(ifs,line);
+	for(int linenum = 1; !ifs.eof(); linenum++) {
 
 		// remove comments 
 		line = line.substr(0,line.find('#'));
 	
+		if(regex_match(line, args, emptyRe)) {
+			// do nothing
+		} else if(regex_match(line, args, varRe)) {
 		/**********************************************
 		 * Variable declaration: 
 		 *		match var=val[,val[,val[...]]]
 		 *********************************************/
-		if(regex_match(line, args, emptyRe)) {
-			// do nothing
-		} else if(regex_match(line, args, varRe)) {
 #ifndef NDEBUG
 			cerr << "Declare:'"  << line << "'" << endl;
 #endif// NDEBUG
@@ -410,6 +481,7 @@ Chain::Chain(string filename) : m_err(0)
 				cerr << "On line " << line << "\nError variables are of type "
 					"name=val[,val[...]]\n";
 				m_err = -1;
+				return;
 			}
 			
 			string varname = args[1];
@@ -435,65 +507,52 @@ Chain::Chain(string filename) : m_err(0)
 			/*****************************************
 			 * Input Declaration
 			 * 		match 
-			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = ({prov}[*,{prov}[*,{prov}]])
+			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = 
+			 *				({prov}[*,{prov}[*,{prov}]])
 			 *****************************************/
-			// check if this is an initializing line (input files)
-#ifndef NDEBUG
-			cerr << "Input Line: " << line << "\t" << endl;
-#endif // NDEBUG
-			string sid = args[1]; //string id
-			string fnames = args[2];
-			string mixture = args[3];
-			auto ret = m_leaves.insert(pair<vector<int>,shared_ptr<Leaf>>(
-						getId(sid), NULL));
-			if(ret.second == false && !ret.first->second->m_placeholder) {
-				cerr << "Error: redeclaration of " << sid << " in " 
-					<< filename << ":" << linenum+1 << endl;
-			}
-
-			// remove reshape commands
-			vector<string> reshapes;
-			std::regex reg("([%=])\\s*\\{([^{]*)\\}");
-			while(std::regex_search(fnames, args, reg)) {
-				reshapes.push_back(args[1].str()+args[2].str());
-				fnames = args.prefix().str() + args.suffix().str();
-			}
-
-#ifndef NDEBUG
-			cerr << "Reshape Specifiers: " << endl;
-			for(auto vv : reshapes) 
-				cerr << "\t" <<  vv << endl;
-#endif//DEBUG
-
-			// split out output files
-			vector<string> filepatterns;
-			sregex_token_iterator regIt(fnames.cbegin(), fnames.cend(), commaRe);
-			for(; regIt != regEnd ; ++regIt) 
-				filepatterns.push_back(*regIt);
 
 			// create new leaf
 			auto newleaf = shared_ptr<Input>(new Input(filename, linenum+1, 
-						mixture, filepatterns, reshapes, this));
+						args[1], args[2], args[3], this));
 
-
-			prevleaf = newleaf.get();
+			auto ret = m_inputs.insert(pair<vector<int>,shared_ptr<Input>>(
+						getId(sid), newleaf));
+			if(ret.second == false) {
+				cerr << "Error: redeclaration of " << sid << " in " 
+					<< filename << ":" << linenum+1 << endl;
+				m_err = -1;
+				return;
+			}
 		} else if(regex_match(line, args, cmdRe)) {
 			/*****************************************
 			 * Process Declaration
 			 * 		match 
-			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
+			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = 
+			 *				cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
 			 *****************************************/
 			// check if this is an initializing line (input files)
-			cerr << "Command Line : (matches: " << args.size() << "\t" << line << "\t" << endl;
-			for(unsigned int ii = 0 ; ii < args.size(); ii++) {
-				cerr << args[ii] << endl;
+			
+			auto newleaf = shared_ptr<Proc>(new Input(filename, linenum+1, 
+						args[1], args[2], args[3], this));
+
+			auto ret = m_proc.insert(pair<vector<int>,shared_ptr<Proc>>(
+						getId(sid), newleaf));
+			if(ret.second == false) {
+				cerr << "Error: redeclaration of " << sid << " in " 
+					<< filename << ":" << linenum+1 << endl;
+				m_err = -1;
+				return;
 			}
-			cerr << endl;
 		}
 
 		std::getline(ifs,line);
 		linenum++;
 	}
+
+	// resolve variables
+	// todo
+	//
+	
 	for(auto it1 = m_vars.begin(); it1 != m_vars.end(); it1++) {
 		cerr << it1->first;
 		for(auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
