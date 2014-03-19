@@ -131,6 +131,10 @@ prefix={base}/{subject}/pipe
 0.1:proc:[t1_in_fmri.nii.gz,trans.mat] = flirt -in {<0} -ref {<1} -out {>t1_in_fmri.nii.gz} -tfm {>trans.mat}
 0.2:proc:[fmri_in_t1.nii.gz] = flirt -init {<1} -ref {<0.0:1} -inv -out {>fmri_in_t1.nii.gz}
 
+### this would contatinate all the fMRI images from each subject:
+##0.3:i:[{*0.2:0|fmri}] = {base}*{subject}
+##0.3:proc:[fmri_in_t1.nii.gz] = flirt -init {<1} -ref {<0.0:1} -inv -out {>fmri_in_t1.nii.gz}
+
 #foreach t1 in subject:
 #    foreach d in dti:
 #      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
@@ -174,7 +178,7 @@ prefix={base}/{subject}/pipe
 # (/datadir,fmri_year2,10343),
 # (/datadir,fmri_year2,1)
 #
-# Then the term in the output array: '{base}/{subject}/{fmri}*.nii.gz%{subject}'
+# Then the term in the output array: '{base}/{*subject}/{fmri}*.nii.gz'
 # divides arguments by subject, so the argument list for job 0 is:
 #[(/datadir,fmri_year1,10107),
 # (/datadir,fmri_year1,10343),
@@ -187,28 +191,8 @@ prefix={base}/{subject}/pipe
 #
 # even though 6 variants are generated, only 2 jobs are created
 
-3.0:i:[{base}/{subject}/{fmri}*.nii.gz%{subject}] = ({base}*{fmri}*{subject})
+3.0:i:[{base}/{*subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
 3.1:p:[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
-
-# Instead of %, = will generate argument lists where the metadata is equal across
-# all the arguments. So
-# Then the term in the output array: '{base}/{subject}/{fmri}*.nii.gz={subject}'
-# divides arguments by subject, so the argument list for job 0 is:
-#[(/datadir,fmri_year1,10107),
-# (/datadir,fmri_year2,10107)]
-#
-# The argument list for job 1 will be:
-#[(/datadir,fmri_year1,10343),
-# (/datadir,fmri_year2,10343)]
-#
-# And the argument list for job 2 will be :
-#[(/datadir,fmri_year1,1)
-# (/datadir,fmri_year2,1)]
-#
-# Multiple tags can be applied to further affect the results, they
-# are applied in order of appearance
-4.0:i:[{base}/{subject}/{fmri}*.nii.gz={subject}] = ({base}*{fmri}*{subject})
-4.1:p:[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
 
 ###### FUTURE ############
 #### create a lot of outputs
