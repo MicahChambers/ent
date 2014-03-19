@@ -53,6 +53,7 @@ public:
 
 	class Input;
 	class Proc;
+	class Argument;
 
 private:
 	std::map<std::vector<int>,std::shared_ptr<Proc>, vintComp> m_procs;
@@ -72,15 +73,16 @@ class Chain::Leaf
 {
 	public:
 		Leaf(std::string file, unsigned int line, string sid);
-		Leaf();
 
 		// nothing yet
 		size_t getNProc();
+		size_t getNOutputs();
+
+		// returns the output args for a given process
 		const std::vector<std::string>& getArgs(size_t proc);
 
 	protected:
 		std::vector<int> m_id;
-		bool m_placeholder;
 		std::string m_parsefile;
 		unsigned int m_parseline;
 
@@ -99,11 +101,21 @@ class Chain::Leaf
 class Chain:: Proc : private Chain::Leaf
 {
 	public:
-	Proc(std::string file, unsigned int line, std::string mixture,
-		const std::vector<std::string>& filepatterns, 
-		const std::vector<std::string>& reshapes, const Chain* parent);
+	Proc(std::string file, unsigned int line, std::string sid, 
+			std::string filepatterns, std::string cmd, 
+			const Chain* parent) ;
 
 	private: 
+	// if processing is du to unresolved inputs, 
+	// we need these to reconstruct
+	bool m_unresolved = true;
+
+	// command, empty strings should be replaced by arguments
+	std::vector<std::string> m_cmd;
+	std::vector<shared_ptr<Argument>> m_args; 
+	
+	// list of unresolved arguments
+	std::list<Argument*> m_nresargs;
 
 	/* Metadata */
 	// [0..N-1,0..M-1] 
@@ -151,6 +163,12 @@ class Chain::Input : private Chain::Leaf
 
 	private: 
 
+	// if processing is du to unresolved inputs, 
+	// we need these to reconstruct
+	string m_filepatterns;
+	string m_mixture;
+	bool m_unresolved;
+	
 	/* Metadata */
 	// [0..N-1,0..M-1] 
 	// where N is the number of permutations of the metadata, and
@@ -164,7 +182,10 @@ class Chain::Input : private Chain::Leaf
 	// corresponding files, in the order listed in the ent file
 	// rows are permutations of metadata
 	// columns are index files
-	std::vector<std::vector<std::string>> m_files; 
+	std::vector<std::vector<Argument>> m_files; 
+
+	// list of unresolved arguments
+	std::list<Argument*> m_nresargs;
 	
 	// names of each of the metadata variables corresponding
 	// to the outer vector of m_outvars;

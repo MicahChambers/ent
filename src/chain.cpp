@@ -148,6 +148,23 @@ Chain::Leaf::getNProc()
 	return m_outputs.size();
 }
 
+/**********************************************************
+ * Proc
+ ***********************************************************/
+Chain::Proc::Proc(string file, unsigned int line, string sid, 
+		string filepatterns, string cmd, const Chain* parent) 
+		: Leaf(file, line, sid), 
+		m_unresolved(false), m_parent(parent)
+{
+	// parse file patterns, they shouldn't contain variables
+	
+	// parse command line, there may be unresolved inputs
+	
+}
+
+/**********************************************************
+ * Input 
+ ***********************************************************/
 
 /**
  * @brief Parses a single input variable variable {base} or {0.1:5-10}
@@ -213,22 +230,27 @@ Chain::Input::parseFiles(string fnames)
 	return 0;
 }
 
-/**********************************************************
- * Input 
- ***********************************************************/
-
 Chain::Input::Input(string file, unsigned int line, string sid, 
 		string filepatterns, string mixture, const Chain* parent) 
-		: Leaf(file, line, sid), m_parent(parent)
+		: Leaf(file, line, sid), m_filepatterns(filepatterns),
+		m_mixture(mixture), m_unresolved(false), m_parent(parent)
 {
 	// todo determine number of arguments
 	// todo determine procs
-	if(parseFiles(filepatterns)) != 0) {
+	int parseResult = parseFiles(filepatterns);
+
+	if(parseResult == 1) {
+		// unresolved identifiers, delay
+		m_unresolved = true;
+		return;
+	} else if(parseResult < 0) {
+		// error
 		cerr << "Error Parsing File" << file << ":" << line << endl;
-		m_err(-1);
+		m_err = -1;
 		return;
 	}
-	// convert mixture
+
+	// proceed with converting mixture
 	if(mixtureToMetadata(mixture, parent) != 0) {
 		cerr << "Error Parsing Mixture" << file << ":" << line << endl;
 		m_err(-1);
