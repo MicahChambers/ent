@@ -10,7 +10,7 @@ using std::string;
 
 int main(int argc, char** argv)
 {
-	try {  
+	try {
 	/* 
 	 * Command Line 
 	 */

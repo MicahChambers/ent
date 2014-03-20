@@ -5,3 +5,4 @@ def build(bld):
     bld.shlib(target = 'chain', source = 'chain.cpp', use='tclap')
     bld.program(target = 'chain_test', source = 'chain_test.cpp', use = 'chain')
     bld.program(target = 'runjob_test', source = 'runjob_test.cpp', use='PTHREAD')
+    bld.program(target = 'glob_test', source = 'glob_test.cpp', use='tclap PTHREAD')
