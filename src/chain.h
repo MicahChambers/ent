@@ -51,13 +51,10 @@ public:
 		return o <<  std::endl; 
 	};
 
-	class Input;
-	class Proc;
-	class Argument;
+	class Link;
 
 private:
-	std::map<std::vector<int>,std::shared_ptr<Proc>, vintComp> m_procs;
-	std::map<std::vector<int>,std::shared_ptr<Input>, vintComp> m_inputs;
+	std::map<std::vector<int>,std::shared_ptr<Link>, vintComp> m_links;
 	std::map<std::string,std::list<std::string>> m_vars;
 
 //	std::vector<int> getId(std::string);
@@ -65,140 +62,73 @@ private:
 };
 
 /*
- * Leaf Class
+ * Link Class
  * 
  * This class is the base class for Proc and Input
  */
-class Chain::Leaf
+class Chain::Link
 {
 	public:
-		Leaf(std::string file, unsigned int line, string sid);
+		enum NodeType {INPUT, PROC};
 
-		// nothing yet
-		size_t getNProc();
-		size_t getNOutputs();
+		Link(std::string sourcefile, unsigned int line, NodeType type,
+				std::string sid, std::string defsource, std::string outspec, 
+				std::string inspec, Chain* parent);
 
-		// returns the output args for a given process
-		const std::vector<std::string>& getArgs(size_t proc);
+		// for traversal
+		bool m_visited;
+		bool m_resolved;
 
+		// basic info
+		const std::string m_sourcefile;
+		const unsigned int m_line;
+		const std::vector<int> m_id;
+		const std::string m_sid;
+		const NodeType m_type;
+		const std::string m_prevLink;
+		
+		int m_err;
+
+		int resolveExternal(std::list<std::string>&);
 	protected:
-		std::vector<int> m_id;
-		std::string m_parsefile;
-		unsigned int m_parseline;
 
-		// for each process, vector of output files
+
+
+		// J x A = jobs x args
+		std::vector<std::vector<std::string>> m_inputs;
 		std::vector<std::vector<std::string>> m_outputs;
-	
-	friend Chain;
-};
 
-/* 
- * Proc Class
- *
- * Parses out input and creates output files for other Proc class
- *
- */
-class Chain:: Proc : private Chain::Leaf
-{
-	public:
-	Proc(std::string file, unsigned int line, std::string sid, 
-			std::string filepatterns, std::string cmd, 
-			const Chain* parent) ;
+		// J x M = jobx x relavent metadata
+		// [run1,subject1]
+		// [run1,subject2]
+		// [run2,subject1]
+		// [run2,subject2] ...
+		std::vector<std::vector<std::string>> m_metadata;
 
-	private: 
-	// if processing is du to unresolved inputs, 
-	// we need these to reconstruct
-	bool m_unresolved = true;
+		// labels for columns of m_metadata, 
+		std::vector<std::string> m_labels;
 
-	// command, empty strings should be replaced by arguments
-	std::vector<std::string> m_cmd;
-	std::vector<shared_ptr<Argument>> m_args; 
-	
-	// list of unresolved arguments
-	std::list<Argument*> m_nresargs;
+		// lookup table for jobs, 
+		// M x N x J' = rows indexed by varnmae corresponding to 
+		// m_labels, N indexed by particular value of metadata from
+		// first index, interior vector is a list of jobs indexes
+		// that have the metadata value pair specified
+		// 
+		// so to find a subject named subject1,
+		// int ii = m_labels.find('subject')
+		// int jj = m_index[ii].find('subject1')
+		// m_index[ii][jj] = jobs where subject=subject1
+		std::vector<std::vector<std::vector<int>>> m_index;
 
-	/* Metadata */
-	// [0..N-1,0..M-1] 
-	// where N is the number of permutations of the metadata, and
-	// M is the number of output files
-	//
-	// rows are permutations of metadata
-	// columns are index metadata
-	std::vector<std::vector<std::string>> m_metadata;
-	
-	// outer vector matches the m_metadata vector, inner is the
-	// corresponding files, in the order listed in the ent file
-	// rows are permutations of metadata
-	// columns are index files
-	std::vector<std::vector<std::string>> m_files; 
-	
-	// names of each of the metadata variables corresponding
-	// to the outer vector of m_outvars;
-	std::vector<std::string> m_outvars; 
+		// inputs and outputs before they have been mapped to particular 
+		// jobs/metadata, ie still has {var} values
+		std::list<std::string> m_preinputs;
+		std::list<std::string> m_preoutputs;
 
-	std::list<std::shared_ptr<Leaf>> m_children;	//run after
-	
-	std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
+		const Chain* m_parent;
+		friend Chain;
 
-	// helper function that mixes metadata
-	int mixtureToMetadata(std::string file, const Chain* parent);
-
-	const Chain* m_parent;
-	friend Chain;
-};
-
-
-/* 
- * Input Class
- *
- * Parses out input and creates output files for other Proc class
- *
- */
-class Chain::Input : private Chain::Leaf
-{
-	public:
-	Input(std::string file, unsigned int line, std::string mixture,
-		const std::vector<std::string>& filepatterns, 
-		const std::vector<std::string>& reshapes, const Chain* parent);
-
-	private: 
-
-	// if processing is du to unresolved inputs, 
-	// we need these to reconstruct
-	string m_filepatterns;
-	string m_mixture;
-	bool m_unresolved;
-	
-	/* Metadata */
-	// [0..N-1,0..M-1] 
-	// where N is the number of permutations of the metadata, and
-	// M is the number of output files
-	//
-	// rows are permutations of metadata
-	// columns are index metadata
-	std::vector<std::vector<std::string>> m_metadata;
-	
-	// outer vector matches the m_metadata vector, inner is the
-	// corresponding files, in the order listed in the ent file
-	// rows are permutations of metadata
-	// columns are index files
-	std::vector<std::vector<Argument>> m_files; 
-
-	// list of unresolved arguments
-	std::list<Argument*> m_nresargs;
-	
-	// names of each of the metadata variables corresponding
-	// to the outer vector of m_outvars;
-	std::vector<std::string> m_outvars; 
-
-	std::list<std::shared_ptr<Leaf>> m_children;	//run after
-	
-	std::list<std::shared_ptr<std::thread>> m_proc; // running process pointer
-
-	// helper function that mixes metadata
-	int mixtureToMetadata(std::string file, const Chain* parent);
-
-	const Chain* m_parent;
-	friend Chain;
+		int mixtureToMetadata(std::string spec, const Chain* parent);
+		int internalFileParse(std::list<std::string>& files);
 };
 

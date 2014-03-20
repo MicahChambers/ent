@@ -210,3 +210,16 @@ prefix={base}/{subject}/pipe
 ##5.3:p:[sum] = fslmaths {5.1:0} {5.1:1-3@-add } [sum] 
 ##
 ##5 :source: [outspec[,outspec[...]]] = script.ent {<blah} {<blah} {>outspec} 
+
+# this just creates a link to 3.1's outputs
+6.0:i:[{3.1:}] = {base}*{fmri}*{subject}
+
+# this expands all the outputs of 3.1
+7.0:i:[{*3.1:0}] = {base}*{fmri}*{subject}
+
+8.0:i:[{*3.1:0-2,4|base}] = {base}*{fmri}*{subject}
+9.0:i:[{*3.1:|base}] = {base}*{fmri}*{subject}
+10.0:i:[{*0|base}] = {base}*{fmri}*{subject}
+11.0:i:[{*|base}] = {base}*{fmri}*{subject}
+12.0:i:[{*|base,subject}] = {base}*{fmri}*{subject}
+

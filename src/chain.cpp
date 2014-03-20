@@ -31,14 +31,14 @@ using std::vector;
  ***********************************************************/
 vector<int> getId(string in)
 {
-	const auto periodRe = regex("\\s*([0-9]+)\\s*\\.\\s*");
+	const auto periodRe = regex("\\s*\\.\\s*");
 	const sregex_token_iterator regEnd;
 	
 	// get the id for this line
 	vector<int> id;
 
 	// Iterate Through Non-comman values
-	sregex_token_iterator regIt(in.cbegin(), in.cend(), periodRe);
+	sregex_token_iterator regIt(in.cbegin(), in.cend(), periodRe, -1);
 	for(; regIt != regEnd ; ++regIt) {
 		id.push_back(atoi(regIt->str().c_str()));
 	}
@@ -46,7 +46,28 @@ vector<int> getId(string in)
 	return id;
 }
 
-void printVV(const vector<vector<string>>& in)
+string getSid(vector<int> in)
+{
+	std::ostringstream oss;
+	for(unsigned int ii = 0; ii < in.size(); ii++) {
+		oss << in[ii]; 
+		if(ii+1 < in.size())
+			oss << ".";
+	}
+
+	return oss.str();
+}
+
+template <typename C>
+void printC(const C& in)
+{
+	for(auto it3 = in.begin(); it3 != in.end(); it3++) {
+		cerr << *it3 << ",";
+	}
+}
+
+template <typename C>
+void printCC(const C& in)
 {
 	for(auto it2 = in.begin(); it2 != in.end(); it2++) {
 		cerr << "(";
@@ -124,178 +145,33 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
 	return out;
 }
 
-
-/**********************************************************
- * Leaf 
- ***********************************************************/
-
-Chain::Leaf::Leaf(string file, unsigned int line, string sid)
-{
-	m_placeholder = false;
-	m_parseline = line;
-	m_parsefile = file;
-	m_id = getId(sid);
-}
-
-Chain::Leaf::Leaf()
-{
-	m_placeholder = true;
-}
-
-size_t 
-Chain::Leaf::getNProc()
-{
-	return m_outputs.size();
-}
-
-/**********************************************************
- * Proc
- ***********************************************************/
-Chain::Proc::Proc(string file, unsigned int line, string sid, 
-		string filepatterns, string cmd, const Chain* parent) 
-		: Leaf(file, line, sid), 
-		m_unresolved(false), m_parent(parent)
-{
-	// parse file patterns, they shouldn't contain variables
-	
-	// parse command line, there may be unresolved inputs
-	
-}
-
-/**********************************************************
- * Input 
- ***********************************************************/
-
-/**
- * @brief Parses a single input variable variable {base} or {0.1:5-10}
- * or {*base} or {*0.1:4|base}
- *
- * @param varname 	variable string to parse
- * @param patterns	output patterns, expanded by {* } as necessary
- *
- * @return 
- */
-int Chain::Input::parseVar(string varname, vector<string>& patterns)
-{
-// need a lookup table of eventual files, resolved or not
-}
+//	// produce file list
+//	std::smatch match; 
+//	m_files.resize(m_metadata.size());
+//	for(unsigned int ii = 0 ; ii < m_files.size(); ii++) {
+//
+//		m_files[ii].resize(filepatterns.size());
+//
+//		// for each file pattern, replace the variable name with
+//		// variables from metadata
+//		for(unsigned int ff = 0; ff < filepatterns.size(); ff++) {
+//			m_files[ii][ff] = filepatterns[ff];
+//			cerr << m_files[ii][ff] << " <-> ";
+//
+//			// for each variable, replace variable name with metadata
+//			for(unsigned int vv = 0 ; vv < m_labels.size(); vv++) {
+//				std::regex reg("\\{\\s*"+m_labels[vv]+"\\s*\\}");
+//				while(std::regex_search(m_files[ii][ff], match, reg)) {
+//					m_files[ii][ff] = match.prefix().str() + m_metadata[ii][vv] + 
+//						match.suffix().str();
+//				}
+//			}
+//			cerr << m_files[ii][ff] << endl;
+//		}
+//	}
 
 int
-Chain::Input::parseFiles(string fnames)
-{
-	auto commaRe = regex("(\\s*[^,]+\\s*)");
-	std::regex varRe("\\{\\*\\s([^{]*)\\s\\}");
-	std::smatch args;
-	int finit;	// initial location in file array
-	vector<string> filepatterns;
-
-	// split out output files
-	sregex_token_iterator fnIt(fnames.cbegin(), fnames.cend(), commaRe);
-	for(; fnIt != regEnd ; ++fnIt) {
-
-		parseVar(
-		// initial point to expand from, if necessary from {* }
-		finit = filepatterns.size();
-		filepatterns.push_back(*fnIt);
-
-		// we have a token filename, now expand  {* } variables
-		sregex_token_iterator expIt(fnIt->cbegin(), fnIt->cend(), varRe);
-		for(; expIt != regEnd ; ++expIt) {
-			auto fret = parent->m_vars.find(*expIt);
-			if(fret == parent->m_vars.end()) {
-				cerr << "Unknown Reference '" << *expIt << " in " 
-						<< m_parsefile << ":" << m_parseline << endl;
-				return -1;
-			}
-
-			// [{base}/]
-			// base=1,2
-			int sz = filepatterns.size()-finit;
-			filepatterns.resize(filepatterns.size()+sz*fret.second->size());
-
-			//  [{base}/,undefined]
-			//0 [{base}/,undefined]
-			//0 [1/,undefined]
-			for(unsigned int ii = finit; ii < sz; ii++) {
-				for(auto it = fret.second->begin(); it != fret.second->end();
-							it++) {
-					string before = fnInit->str().substr(0,expIt.first);
-					string after = fnInit->str().substr(expIt.second);
-					filepatterns[ii] = before + (*it) + after;
-				}
-
-			}
-		}
-	}
-	return 0;
-}
-
-Chain::Input::Input(string file, unsigned int line, string sid, 
-		string filepatterns, string mixture, const Chain* parent) 
-		: Leaf(file, line, sid), m_filepatterns(filepatterns),
-		m_mixture(mixture), m_unresolved(false), m_parent(parent)
-{
-	// todo determine number of arguments
-	// todo determine procs
-	int parseResult = parseFiles(filepatterns);
-
-	if(parseResult == 1) {
-		// unresolved identifiers, delay
-		m_unresolved = true;
-		return;
-	} else if(parseResult < 0) {
-		// error
-		cerr << "Error Parsing File" << file << ":" << line << endl;
-		m_err = -1;
-		return;
-	}
-
-	// proceed with converting mixture
-	if(mixtureToMetadata(mixture, parent) != 0) {
-		cerr << "Error Parsing Mixture" << file << ":" << line << endl;
-		m_err(-1);
-		return;
-	}
-
-#ifndef NDEBUG
-	for(auto v : m_outvars) 
-		cerr << v << '\t';
-	cerr << endl;
-	for(auto v : m_metadata) {
-		for(auto v2 : v) 
-			cerr << v2 << '\t';
-		cerr << endl;
-	}
-#endif //NDEBUG
-
-	// produce file list
-	std::smatch match; 
-	m_files.resize(m_metadata.size());
-	for(unsigned int ii = 0 ; ii < m_files.size(); ii++) {
-
-		m_files[ii].resize(filepatterns.size());
-
-		// for each file pattern, replace the variable name with
-		// variables from metadata
-		for(unsigned int ff = 0; ff < filepatterns.size(); ff++) {
-			m_files[ii][ff] = filepatterns[ff];
-			cerr << m_files[ii][ff] << " <-> ";
-
-			// for each variable, replace variable name with metadata
-			for(unsigned int vv = 0 ; vv < m_outvars.size(); vv++) {
-				std::regex reg("\\{\\s*"+m_outvars[vv]+"\\s*\\}");
-				while(std::regex_search(m_files[ii][ff], match, reg)) {
-					m_files[ii][ff] = match.prefix().str() + m_metadata[ii][vv] + 
-						match.suffix().str();
-				}
-			}
-			cerr << m_files[ii][ff] << endl;
-		}
-	}
-}
-
-int
-Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
+Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 {
 #ifndef NDEBUG
 	cerr << "Metavar: " << spec << endl;
@@ -306,7 +182,7 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 
 	list<list<vector<vector<string>>>> stack;
 	list<int> methods;
-	m_outvars.clear();
+	m_labels.clear();
 
 	// innermost list: a variant of the inputs [0, 1, file]
 	// next list : expanded set of variants [[0,1,file],[0,1,file2]], 
@@ -396,7 +272,7 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 			int prev = ii;
 			ii = spec.find_first_of('}',ii);
 			string varname = spec.substr(prev+1,ii-prev-1);
-			m_outvars.push_back(varname);
+			m_labels.push_back(varname);
 
 			auto searchresult = parent->m_vars.find(varname);
 			if(searchresult == parent->m_vars.end()) {
@@ -416,13 +292,13 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 			}
 #ifndef NDEBUG
 			cerr << "Variable " << varname << " expanded to ";
-			printVV(stack.back().back());
+			printCC(stack.back().back());
 #endif //NDEBUG
 		} else {
 			// literal
 			int prev = ii;
 			ii = spec.find_first_of("() {}",ii);
-			m_outvars.push_back("");
+			m_labels.push_back("");
 
 			string str = spec.substr(prev,ii-prev);
 
@@ -434,17 +310,292 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 
 #ifndef NDEBUG
 			cerr << "Literal" << str << " becomes ";
-			printVV(stack.back().back());
+			printCC(stack.back().back());
 #endif //NDEBUG
 		}
 
 	}
 #ifndef NDEBUG
 	cerr << "Metadata expansion:" << endl;
-	printVV(stack.back().back());
+	printCC(stack.back().back());
 #endif //NDEBUG
 
 	m_metadata = stack.back().back();
+	return 0;
+}
+
+/**********************************************************
+ * Link
+ ***********************************************************/
+Chain::Link::Link(std::string sourcefile, unsigned int line, NodeType type,
+		std::string sid, std::string defsource, std::string outspec, 
+		std::string inspec, Chain* parent) 
+		: m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
+		m_sid(getSid(m_id)), m_type(type), m_prevLink(defsource), m_parent(parent)
+
+{
+	const sregex_token_iterator regEnd;
+	m_resolved = true;
+	m_visited = false;
+
+	m_err = 0;
+
+	if(type == INPUT) {
+		// parse inspec as metadata
+		if(mixtureToMetadata(inspec, parent) != 0) {
+			m_err = -1;
+			return;
+		}
+
+		// parse outspec as files
+		m_preinputs.clear();
+//		m_preoutputs.clear();
+		
+		// split out output files, (but ignore commas inside {}
+		auto commaRe = regex("\\s*,(?=[^}]*\\{)\\s*");
+		sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), commaRe, -1);
+		for(; fnIt != regEnd ; ++fnIt) {
+			m_preinputs.push_back(*fnIt);
+//			m_preoutputs.push_back(*fnIt);
+		}
+
+		// parse outputs without resolving external references
+		if(internalFileParse(m_preinputs) != 0) {
+			m_err = -1;
+			return;
+		}
+
+//		if(internalFileParse(m_preoutputs) != 0) {
+//			m_err = -1;
+//			return;
+//		}
+	}
+}
+
+
+
+/**
+ * @brief This function parses and expands any resolvable  {* } variables
+ * but ignores external references. It is like a lightweight version of
+ * externalFileParse()
+ *
+ * @param files	filepattern list to expand
+ *
+ * @return error code
+ */
+int
+Chain::Link::internalFileParse(list<string>& files)
+{
+	const std::sregex_iterator regEnd;
+	std::regex expRe("\\{\\*\\s*([^{|]*)\\s*\\}");
+	std::smatch args;
+#ifndef NDEBUG
+		cerr << "internalFileParse" << endl;
+		printC(files);
+		cerr << " <-> ";
+#endif
+
+	bool changed = false;
+	// split out output files
+	for(auto fit = files.begin(); fit != files.end(); ) {
+		changed = false;
+
+		// we have a token filename, now expand  {* } variables
+		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
+		for(; expIt != regEnd ; ++expIt) {
+			// ignore external references
+			if(expIt->str().find(':') != string::npos) {
+				m_resolved = false;
+				continue;
+			}
+
+			// resolve varaible references
+			auto fret = m_parent->m_vars.find((*expIt)[1]);
+
+			if(fret == m_parent->m_vars.end()) {
+				cerr << "Unknown Reference '" << (*expIt)[1] << " in " 
+						<< m_sourcefile << ":" << m_line << endl;
+				return -1;
+			}
+			
+			changed = true;
+			// we are going to insert a lot of new elements, so save
+			// the current iterator
+			auto previt = fit;
+
+			// get string that goes before and after match
+			string before = expIt->prefix();
+			string after = expIt->suffix();
+
+
+			// insert new values after fit
+			fit++;
+			for(auto vit = fret->second.begin(); vit != fret->second.end(); vit++)
+				files.insert(fit, before + (*vit) + after);
+
+			fit = files.erase(previt);
+		}
+
+		if(!changed)
+			fit++;
+	}
+#ifndef NDEBUG
+			printC(files);
+			cerr << endl;
+#endif
+	return 0;
+}
+
+/**
+ * @brief This function parses and expands any resolvable  {* } variables
+ * by recursing into external references. 
+ *
+ * @param files	filepattern list to expand
+ *
+ * @return error code
+ */
+int Chain::Link::resolveExternal(list<string>& stack)
+{
+	// push ourselves onto the call stack
+	stack.push_back(m_sid);
+	
+	const std::sregex_iterator regEnd;
+	const std::regex expRe("\\{\\*"
+			"(?:\\s*([0-9.]*)\\s*:)?"
+			"(?:\\s*([0-9,\\-]*)\\s*)?"
+			"(?:\\s*\\|([^}]*))?\\}");
+	const std::regex rangeRe("(?:([0-9]+)\\s*-\\s*([0-9]+)|([0-9]+))");
+
+	if(m_visited) {
+		cerr << "Revisited a link, appears to be a circular dependence" << endl;
+		return -1;
+	}
+
+	m_visited = true;
+	
+	auto& files = m_preinputs;
+
+//	std::regex expRe("\\{\\*\\s*([0-9\\.]*)\\s*:?\\s*([0-9,-]*)\\s*\\|?\\}");
+
+#ifndef NDEBUG
+		cerr << "externalFileParse" << endl;
+		printC(files);
+		cerr << endl;
+#endif
+
+	bool changed = false;
+	// split out output files
+	for(auto fit = files.begin(); fit != files.end(); ) {
+		changed = false;
+		cerr << *fit << endl;
+
+		// we have a token filename, now resolve {* } variables
+		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
+		for(; expIt != regEnd ; ++expIt) {
+	
+			string sid = (*expIt)[1];
+			if(sid.empty()) 
+				sid = m_prevLink;
+
+			vector<int> id = getId(sid);
+            string args = (*expIt)[2];
+            string vargs = (*expIt)[3];
+
+#ifndef NDEBUG
+			cerr << "Source      Node: " << sid << endl;
+			cerr << "Output Number(s): " << args << endl;
+			cerr << "Keeping Constant: " << vargs << endl;
+#endif
+
+			// resolve link reference
+			auto fret = m_parent->m_links.find(id);
+
+			if(fret == m_parent->m_links.end()) {
+				cerr << "Unknown Reference '" << (*expIt)[0] << "' in " 
+						<< m_sourcefile << ":" << m_line << endl;
+				return -1;
+			}
+	
+			if(!fret->second->m_resolved) {
+				if(!fret->second->m_visited) {
+					// we haven't visited the node that has our data,
+					// so go ahead and visit it.
+					if(fret->second->resolveExternal(stack) != 0) {
+						return -1;
+					}
+				} else {
+					// found a loop, so fail
+					return -2;
+				}
+			}
+
+			// get arg list
+			std::list<int> argnumbers;
+			std::sregex_iterator rangeIt(args.cbegin(), args.cend(), rangeRe);
+			for(; rangeIt != regEnd; ++rangeIt) {
+				cerr << "Number of matches: " << rangeIt->size() << endl;
+				for(unsigned int ii = 0 ; ii < rangeIt->size(); ii++) {
+					cerr << (*rangeIt)[ii] << endl;
+				}
+
+				if(rangeIt->size() == 3) {
+					int a = atoi((*rangeIt)[1].str().c_str());
+					int b = atoi((*rangeIt)[2].str().c_str());
+					if(a > b) {
+						cerr << "Invalid range: " << (*rangeIt)[0] << endl;
+						return -1;
+					}
+					for(int ii = a; ii <= b; ii++)
+						argnumbers.push_back(ii);
+
+				} else if(rangeIt->size() == 2) {
+					argnumbers.push_back(atoi((*rangeIt)[1].str().c_str()));
+				}
+			}
+#ifndef NDEBUG
+			cerr << "Range resolved to: ";
+			printC(argnumbers);
+			cerr << endl;
+#endif
+
+			// split up constant terms
+			
+			// we have now resolved the current input, so we can use the 
+			// metadata to figure out which inputs to get
+
+
+//			changed = true;
+//			// we are going to insert a lot of new elements, so save
+//			// the current iterator
+//			auto previt = fit;
+//
+//			// get string that goes before and after match
+//			string before = expIt->prefix();
+//			string after = expIt->suffix();
+//
+//
+//			// insert new values after fit
+//			fit++;
+//			for(auto vit = fret->second.begin(); vit != fret->second.end(); vit++)
+//				files.insert(fit, before + (*vit) + after);
+//
+//			fit = files.erase(previt);
+		}
+
+		if(!changed)
+			fit++;
+	}
+#ifndef NDEBUG
+			printC(files);
+			cerr << endl;
+#endif
+
+	m_resolved = true;
+	return 0;
+
+	// remove outself from the call stack
+	stack.pop_back();
+
 	return 0;
 }
 
@@ -454,6 +605,8 @@ Chain::Input::mixtureToMetadata(string spec, const Chain* parent)
 
 /**
  * @brief Parsing works as follows
+ 
+ * Read all input, creating nodes without resolving any {} variables
  *
  * Read all input, creating nodes without resolving any {} variables
  *
@@ -478,9 +631,9 @@ Chain::Chain(string filename) : m_err(0)
 	std::smatch args;
 
 	vector<int> prevleaf;
+	vector<int> curleaf; 
 
 	string line;
-	int linenum = 0;
 	ifstream ifs(filename);
 	std::getline(ifs,line);
 	for(int linenum = 1; !ifs.eof(); linenum++) {
@@ -516,7 +669,7 @@ Chain::Chain(string filename) : m_err(0)
 						list<string>()));
 			if(ret.second == false) {
 				cerr << "Warning: redeclaration of " << varname << " in " 
-					<< filename << ":" << linenum+1 << endl;
+					<< filename << ":" << linenum << endl;
 			}
 				
 			// Iterate Through Non-comma values
@@ -533,42 +686,95 @@ Chain::Chain(string filename) : m_err(0)
 			 *				({prov}[*,{prov}[*,{prov}]])
 			 *****************************************/
 
-			// create new leaf
-			auto newleaf = shared_ptr<Input>(new Input(filename, linenum+1, 
-						args[1], args[2], args[3], this));
-
-			auto ret = m_inputs.insert(pair<vector<int>,shared_ptr<Input>>(
-						getId(sid), newleaf));
-			if(ret.second == false) {
-				cerr << "Error: redeclaration of " << sid << " in " 
-					<< filename << ":" << linenum+1 << endl;
+			/*
+			 * Handle ids
+			 */
+			if(args[1].str().empty() && prevleaf.empty()) {
+				cerr << "Error, first Link MUST have a identifier: "
+					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
 				m_err = -1;
 				return;
 			}
-		} else if(regex_match(line, args, cmdRe)) {
-			/*****************************************
-			 * Process Declaration
-			 * 		match 
-			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = 
-			 *				cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
-			 *****************************************/
-			// check if this is an initializing line (input files)
-			
-			auto newleaf = shared_ptr<Proc>(new Input(filename, linenum+1, 
-						args[1], args[2], args[3], this));
 
-			auto ret = m_proc.insert(pair<vector<int>,shared_ptr<Proc>>(
-						getId(sid), newleaf));
+			// just set previous leaf to current leaf
+			if(prevleaf.empty()) {
+				prevleaf = getId(args[1]);
+			}
+
+			// if current leaf was left blank, just default to the next value
+			// from prevleaf
+			if(args[1].str().empty()) {
+				curleaf = prevleaf;
+				curleaf.back()++;
+			} else {
+				curleaf = getId(args[1].str());
+			}
+
+			/*
+			 * create new data structure
+			 */
+			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
+						Link::INPUT, getSid(curleaf), getSid(prevleaf), 
+						args[2], args[3], this));
+
+			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
+						newleaf->m_id, newleaf));
 			if(ret.second == false) {
-				cerr << "Error: redeclaration of " << sid << " in " 
-					<< filename << ":" << linenum+1 << endl;
+				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
+					<< filename << ":" << linenum << endl;
 				m_err = -1;
 				return;
 			}
+//		} else if(regex_match(line, args, cmdRe)) {
+//			/*****************************************
+//			 * Process Declaration
+//			 * 		match 
+//			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = 
+//			 *				cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
+//			 *****************************************/
+//			// check if this is an initializing line (input files)
+//			
+//			auto newleaf = shared_ptr<Proc>(new Input(filename, linenum, 
+//						args[1], args[2], args[3], this));
+//
+//			auto ret = m_proc.insert(pair<vector<int>,shared_ptr<Proc>>(
+//						getId(sid), newleaf));
+//			if(ret.second == false) {
+//				cerr << "Error: redeclaration of " << sid << " in " 
+//					<< filename << ":" << linenum << endl;
+//				m_err = -1;
+//				return;
+//			}
 		}
 
 		std::getline(ifs,line);
-		linenum++;
+	}
+
+	list<string> stack;
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+
+		// prepare for traversal
+		for(auto vv : m_links) 
+			vv.second->m_visited = false;
+
+		// stack is just for debugging purposes of the user
+		stack.clear();
+
+		// resolve external references in inputs of current link 
+		// by resolving parents references. Fails if a cycles is
+		// detected. (ie traversal tries to revisit a node)
+		if(it->second->resolveExternal(stack) != 0) {
+			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
+				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+			m_err = -1;
+
+			cerr << "Offending chain:" << endl;
+			for(auto vv : stack) {
+				cerr << vv << " <- ";
+			}
+			cerr << endl;
+			return ;
+		}
 	}
 
 	// resolve variables
