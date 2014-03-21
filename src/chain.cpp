@@ -372,11 +372,11 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	cerr << "Output:  "; printC(m_preoutputs); cerr << endl;
 #endif //NDEBUG
 
-	// parse outputs without resolving external references
-	if(resolveInternal() != 0) {
-		m_err = -1;
-		return;
-	}
+//	// parse outputs without resolving external references
+//	if(resolveInternal() != 0) {
+//		m_err = -1;
+//		return;
+//	}
 }
 
 // Input Constructor
@@ -414,11 +414,11 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	cerr << "Metadata Expansion:  "; printCC(m_metadata); cerr << endl;
 #endif //NDEBUG
 
-	// parse inputs without resolving external references
-	if(resolveInternal() != 0) {
-		m_err = -1;
-		return;
-	}
+//	// parse inputs without resolving external references
+//	if(resolveInternal() != 0) {
+//		m_err = -1;
+//		return;
+//	}
 
 }
 
@@ -805,49 +805,17 @@ Chain::parseFile(string filename)
 
 			auto ret = m_vars.insert(pair<string,list<string>>(varname,
 						list<string>()));
-			if(ret.second) {
-				// Split comma separated values into tokens
-				sregex_token_iterator regIt(value.cbegin(), value.cend(), commaRe, -1);
-				for(; regIt != regEnd ; ++regIt) {
-					ret.first->second.push_back(*regIt);
-					auto newpos = ret.first->second.end();
-					newpos--;
-
-					list<string> tmplist ;
-					// expand any variables
-					while(std::regex_search(value, args, curlyRe)) {
-						cerr << args[0].str() << endl;
-						cerr << args[1].str() << endl;
-						auto lookup = m_vars.find(args[1].str());
-
-						if(lookup == m_vars.end()) {
-							cerr << "Error! Undefined reference in " 
-								<< filename << ":" << linenum << endl;
-							cerr << varname << " references " << args[1] 
-								<< " which is undefined" << endl;
-							return -1;
-						}
-
-						for(auto& vv : lookup->second) {
-							tmplist.push_back(
-						}
-
-					}
-
-
-					for(auto vv : lookup->second) {
-						
-					}
-					value = args.prefix().str()+lookup->second+args.suffix().str(); 
-				}
-
-			} else {
+			if(!ret.second) {
 				cerr << "Warning: redeclaration of " << varname << " in " 
 					<< filename << ":" << linenum << endl;
 				cerr << varname << "=" << value << endl;
 				cerr << "Value will NOT be updated!" << endl;
 			}
-			
+
+			// Split comma separated values into tokens
+			sregex_token_iterator regIt(value.cbegin(), value.cend(), commaRe, -1);
+			for(; regIt != regEnd ; ++regIt) 
+				ret.first->second.push_back(*regIt);
 		} else if(regex_match(line, args, inputRe)) {
 			/*****************************************
 			 * Input Declaration
