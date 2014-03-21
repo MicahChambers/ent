@@ -53,6 +53,8 @@ public:
 	};
 
 	class Link;
+	
+	int resolveTree();
 
 private:
 	std::map<std::vector<int>,std::shared_ptr<Link>, vintComp> m_links;
@@ -70,6 +72,7 @@ private:
 class Chain::Link
 {
 	public:
+		class Argument;
 		enum NodeType {INPUT, PROC};
 
 		//process initialize
@@ -88,6 +91,7 @@ class Chain::Link
 		bool m_visited;
 		bool m_resolved;
 		bool m_populated;
+		bool m_success;
 		
 		// command
 		const std::string m_cmd;
@@ -103,12 +107,16 @@ class Chain::Link
 		int m_err;
 
 		int resolveExternal(std::list<std::string>& stack);
+		int resolveTree(std::list<std::string>& stack);
 		int populate();
 
 		int run();
+
+
 	protected:
 
 		// J x A = jobs x args
+		std::vector<Argument> m_arguments;
 		std::vector<std::vector<std::string>> m_inputs;
 		std::vector<std::vector<std::string>> m_outputs;
 
@@ -139,6 +147,8 @@ class Chain::Link
 		// jobs/metadata, ie still has {var} values
 		std::list<std::string> m_preinputs;
 		std::list<std::string> m_preoutputs;
+		std::list<std::list<std::string>> m_postinputs;
+		std::list<std::list<std::string>> m_postoutputs;
 
 		const Chain* m_parent;
 		friend Chain;
@@ -147,4 +157,3 @@ class Chain::Link
 		int resolveInternal();
 
 };
-

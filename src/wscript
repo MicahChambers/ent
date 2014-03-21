@@ -6,3 +6,4 @@ def build(bld):
     bld.program(target = 'chain_test', source = 'chain_test.cpp', use = 'chain')
     bld.program(target = 'runjob_test', source = 'runjob_test.cpp', use='PTHREAD')
     bld.program(target = 'glob_test', source = 'glob_test.cpp', use='tclap PTHREAD')
+    bld.program(target = 'expand_test', source = 'expand_test.cpp', use='tclap PTHREAD')

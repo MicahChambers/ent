@@ -38,6 +38,10 @@ vector<int> getId(string in)
 	// Iterate Through Non-comman values
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), periodRe, -1);
 	for(; regIt != regEnd ; ++regIt) {
+		for(auto ival : regIt->str()){
+			if(ival > '9' || ival < '0') 
+				return vector<int>();
+		}
 		id.push_back(atoi(regIt->str().c_str()));
 	}
 
@@ -82,6 +86,67 @@ void printCC(const C& in)
 		if(it2+1 != in.end()) 
 			cerr << ",";
 	}
+}
+
+
+/**
+ * @brief Performs an expansion of argument ranges in things 
+ * like {*blah:3-5|what} or {1.1:3-9,0|subject}
+ *
+ * @param expression	Input expresion, output will
+ * @param lout			List output
+ * @param sout			String output
+ *
+ * @return Error status, negative is bad
+ */
+int expand(std::string expression, std::list<int>& lout, std::string& sout)
+{
+	const std::sregex_iterator regEnd;
+	const std::regex expRe("(\\{\\*?"
+			"(?:\\s*[0-9.]*\\s*:)?)"
+			"(?:\\s*([a-zA-Z0-9,\\-]*)\\s*)?"
+			"((?:\\s*\\|[^}]*)?\\})");
+	const std::regex rangeRe("(?:([0-9]+)-([0-9]+)|([0-9]+))");
+	
+	std::smatch args;
+	lout.clear();
+	string prefix;
+	string suffix;
+
+	if(regex_search(expression, args, expRe)) {
+		prefix = args[1].str();
+		suffix = args[3].str();
+
+		string rterm = args[2].str();
+		sregex_iterator it(rterm.cbegin(), rterm.cend(), rangeRe);
+		for(; it != regEnd; it++) {
+			string low = (*it)[1].str();
+            string hi = (*it)[2].str();
+			string single = (*it)[3].str();
+
+			if(!low.empty() && !hi.empty()) {
+				int a = atoi(low.c_str());	
+				int b = atoi(hi.c_str());	
+				if(a > b) {
+					cerr << "Illegal range: " << a << "-" << b << endl;
+					return -1;
+				}
+				for( ; a <= b; a++)
+					lout.push_back(a);
+			} else if(!single.empty()) {
+				lout.push_back(atoi(single.c_str()));
+			}
+		}
+	} else {
+		cerr << "Error, syntax not understood: " << expression << endl;
+		return -1;
+	}
+
+	ostringstream oss; 
+	for(auto& v : lout)
+		oss << prefix << v << suffix << ", ";
+	sout = oss.str();
+	return 0;
 }
 
 /* 
@@ -423,6 +488,54 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 }
 
 
+int Chain::Link::resolveTree(list<string>& callstack)
+{
+	// {GLOBALVAR}
+	// {*GLOBALVAR}
+	// {spec
+	const std::sregex_iterator regEnd;
+	const std::regex expRe("\\{(\\*)?"
+			"(?:\\s*([0-9.]*)\\s*:)?"
+			"(?:\\s*([a-zA-Z0-9,\\-]*)\\s*)?"
+			"(?:\\s*\\|([^}]*))?\\}");
+
+	
+	if(m_resolved) {
+		return 0;
+	}
+
+	// TODO TOMORROW RESOLVE EXTERNALS FIRST!
+	// then resolve internals to decide how metadata is enumerated
+
+	// outside list iterates over jobnumbers, inside over argument number
+	list<list<string>> inputs;
+	bool changed;
+
+	int ret = resolveExternal(callstack);
+	if(ret < 0) {
+		cerr << "Error resolving inputs for " << it->second->m_sid << " from "
+			<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+	} else if (ret > 0) {
+		cerr << "Warning, cannot currently resolve inputs for " 
+			<< it->second->m_sid << " from "
+			<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+	}
+
+	resolveInternal();
+
+
+	// resolve outputs
+	
+	m_success = true;
+	return 0;
+}
+
+
+int
+Chain::Link::getMetadataOutput(vector<vector<string>>** metadata, 
+			vector<vector<string>>** output)
+{
+}
 
 /**
  * @brief This function parses and expands any resolvable  {* } variables
@@ -583,24 +696,58 @@ Chain::Link::run()
 	return 0;
 }
 
+
 /**
- * @brief This function parses and expands any resolvable  {* } variables
- * by recursing into external references. If we manage to resolve all the
- * inputs, then we populate the inputs vector with filename
+ * @brief This function takes two sets of metadata and merges them into
+ * 	target, which is the output. If expand is specified output metadata
+ * 	will be 1xN, if control is specified, the expansion is limited to 
+ * 	variables not specififed in control. IE
  *
- * @param files	filepattern list to expand
+ * 	expand 
+ * 	subject run time
+ *
+ * 	without control, all subjects, times and runs will be placed onthe 
+ * 	command line together.
+ *
+ * 	with control = subject. The number of rows will be the number of 
+ * 	of rows 
+ *
+ * @param target
+ * @param source
+ * @param expand
+ * @param control
+ *
+ * @return 
+ */
+int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& target,
+		std::vector<std::vector<std::string>> source, 
+		bool expand, std::string control)
+{
+	list<string> contlist;
+	list<list<string>> sourcetmp;
+	
+	return 0;
+}
+
+/**
+ * @brief Before: m_inputs, m_preinputs, m_metadata could be subject to 
+ * change by parent links, after m_metadata and m_inputs are 
+ * in their final form.
+ *
+ * @param call stack 
  *
  * @return error code
  */
-int Chain::Link::resolveExternal(list<string>& stack)
+int Chain::Link::resolveExternalInputs(list<string>& callstack)
 {
+	cerr << "resolveExternalInputs" << endl;
 	// push ourselves onto the call stack
 	stack.push_back(m_sid);
 	
 	const std::sregex_iterator regEnd;
-	const std::regex expRe("\\{\\*"
+	const std::regex expRe("\\{(\\*)?"
 			"(?:\\s*([0-9.]*)\\s*:)?"
-			"(?:\\s*([0-9,\\-]*)\\s*)?"
+			"(?:\\s*([a-zA-Z0-9,\\-]*)\\s*)?"
 			"(?:\\s*\\|([^}]*))?\\}");
 	const std::regex rangeRe("(?:([0-9]+)\\s*-\\s*([0-9]+)|([0-9]+))");
 
@@ -608,18 +755,103 @@ int Chain::Link::resolveExternal(list<string>& stack)
 		cerr << "Revisited a link, appears to be a circular dependence" << endl;
 		return -1;
 	}
-
 	m_visited = true;
 	
-	auto& files = m_preinputs;
-
 //	std::regex expRe("\\{\\*\\s*([0-9\\.]*)\\s*:?\\s*([0-9,-]*)\\s*\\|?\\}");
 
 #ifndef NDEBUG
-		cerr << "externalFileParse" << endl;
-		printC(files);
-		cerr << endl;
+	cerr << "externalFileParse" << endl;
+	printC(files);
+	cerr << endl;
 #endif
+
+	// use these variables to merge together metadata
+	vector<vector<string>>* depOuts; //outputs of a node that must run before
+	vector<vector<string>>* depData; //metadata of a node that must run before
+
+	// resolve inputs
+	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); ) {
+
+		auto insertIt = fit;
+		insertIt++;
+
+		cerr << "Input spec: " << *fit << endl;
+		// we have a token filename, now expand  {* } variables
+		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
+		for(; expIt != regEnd ; ++expIt) {
+			
+			cerr << "Prefix " << expIt->prefix().str() << endl;
+			cerr << "Match " << (*expIt)[0].str() << endl;
+			cerr << "Expand?" << (*expIt)[1].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
+			cerr << "Control: " << (*expIt)[4].str() << endl;
+			cerr << "Suffix " << expIt->suffix().str() << endl;
+
+			// ignore global variables for now 
+			auto gvalit = m_parent->m_vars.find((*expIt)[3]);
+			if(gvalit != m_parent->m_vars.end()) {
+				cerr << "Global Var!" << endl;
+				continue;
+			}
+			
+			if(!expIt->prefix().empty() || !expIt->suffix().empty()) {
+				cerr << "Parsing error. References to output of other "
+					"jobs cannot include literals. ie. /ifs/{1.2:3} is"
+					"not valid. Add /ifs to the parent job instead!" << endl;
+				return -1;
+			}
+
+
+			cerr << (*expIt)[3] << endl;
+			printC(getId((*expIt)[3]));
+			cerr << endl;
+			auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
+			if(linkit != m_parent->m_links.end()) {
+				cerr << "External Reference Var!" << endl;
+			}
+	
+			// make sure the inputs' metadta and outputs are up to date
+			linkit->resolveTree(callstack);
+
+			//merge metadata
+			string control = (*expIt)[4].str();
+			bool expand = (*expIt)[1].str() == "*";
+			if(mergeMetadata(m_metadata, linkit->m_metadata, expand, control) < 0) {
+				cerr << "Error resolving inputs/metadata" << endl;
+				return -1;
+			}
+			
+			// TODO resolve {1-3} earlier
+			// convert {*x.x:1-3} into simple:
+			// {x.x:1} {x.x:2} {x.x:3} 
+			if(!(*expIt)[1].str().empty) {
+				expandStarReference();
+
+			}
+//			// we are going to insert a lot of new elements, so save
+//			// the current iterator
+//			auto previt = fit;
+//
+//			// get string that goes before and after match
+//			string before = expIt->prefix();
+//			string after = expIt->suffix();
+//
+//
+//			// insert new values after fit
+//			fit++;
+//			for(auto vit = fret->second.begin(); vit != fret->second.end(); vit++)
+//				m_preinputs.insert(fit, before + (*vit) + after);
+//
+//			fit = m_preinputs.erase(previt);
+		}
+
+		// when things change, we have already iterated by removing a node
+		if(!changed)
+			fit++;
+	}
+
+
 
 	bool changed = false;
 	// split out output files
@@ -898,45 +1130,6 @@ Chain::parseFile(string filename)
 		line = "";
 	}
 
-//	list<string> stack;
-//	for(auto it = m_links.begin(); it != m_links.end(); it++) {
-//
-//		// prepare for traversal
-//		for(auto vv : m_links) 
-//			vv.second->m_visited = false;
-//
-//		// stack is just for debugging purposes of the user
-//		stack.clear();
-//
-//		// resolve external references in inputs of current link 
-//		// by resolving parents references. Fails if a cycles is
-//		// detected. (ie traversal tries to revisit a node)
-//		if(it->second->resolveExternal(stack) != 0) {
-//			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
-//				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
-//			m_err = -1;
-//
-//			cerr << "Offending chain:" << endl;
-//			for(auto vv : stack) {
-//				cerr << vv << " <- ";
-//			}
-//			cerr << endl;
-//			return -1;
-//		}
-//	}
-//
-//	// resolve variables
-//	// todo
-//	//
-//	
-//	for(auto it1 = m_vars.begin(); it1 != m_vars.end(); it1++) {
-//		cerr << it1->first;
-//		for(auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-//			cerr << "\t" << *it2 << endl;
-//
-//		}
-//	}
-
 	return 0;
 }
 
@@ -963,5 +1156,37 @@ Chain::Chain(string filename) : m_err(0)
 		m_links.clear();
 		m_vars.clear();
 		m_err = -1;
+	}
+}
+
+int Chain::resolveTree()
+{
+	list<string> stack;
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+
+		// prepare for traversal
+		for(auto vv : m_links) {
+			vv.second->m_visited = false;
+			vv.second->m_success = false;
+		}
+
+		// stack is just for debugging purposes of the user
+		stack.clear();
+
+		// resolve external references in inputs of current link 
+		// by resolving parents references. Fails if a cycles is
+		// detected. (ie traversal tries to revisit a node)
+		if(it->second->resolveTree(stack) != 0) {
+			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
+				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+			m_err = -1;
+
+			cerr << "Offending chain:" << endl;
+			for(auto vv : stack) {
+				cerr << vv << " <- ";
+			}
+			cerr << endl;
+			return -1;
+		}
 	}
 }
