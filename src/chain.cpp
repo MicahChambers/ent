@@ -24,8 +24,6 @@ using std::list;
 using std::pair;
 using std::vector;
 
-#define OFF
-
 /**********************************************************
  * Helper Functions
  ***********************************************************/
@@ -62,7 +60,11 @@ template <typename C>
 void printC(const C& in)
 {
 	for(auto it3 = in.begin(); it3 != in.end(); it3++) {
-		cerr << *it3 << ",";
+		cerr << *it3;
+		it3++;
+		if(it3 != in.end()) 
+			cerr << ",";
+		it3--;
 	}
 }
 
@@ -72,11 +74,14 @@ void printCC(const C& in)
 	for(auto it2 = in.begin(); it2 != in.end(); it2++) {
 		cerr << "(";
 		for(auto it3 = it2->begin(); it3 != it2->end(); it3++) {
-			cerr << *it3 << ",";
+			cerr << *it3;
+			if(it3+1 != it2->end()) 
+				cerr << ",";
 		}
-		cerr << "),";
+		cerr << ")";
+		if(it2+1 != in.end()) 
+			cerr << ",";
 	}
-	cerr << endl;
 }
 
 /* 
@@ -183,6 +188,7 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 	list<list<vector<vector<string>>>> stack;
 	list<int> methods;
 	m_labels.clear();
+	m_revlabels.clear();
 
 	// innermost list: a variant of the inputs [0, 1, file]
 	// next list : expanded set of variants [[0,1,file],[0,1,file2]], 
@@ -268,11 +274,15 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 			//ignore
 
 		} else if(spec[ii] == '{') {
+
+			// todo labels will be screwed up by expansion {*} process
+
 			// variable name
 			int prev = ii;
 			ii = spec.find_first_of('}',ii);
 			string varname = spec.substr(prev+1,ii-prev-1);
 			m_labels.push_back(varname);
+			m_revlabels[varname] = m_labels.size()-1;
 
 			auto searchresult = parent->m_vars.find(varname);
 			if(searchresult == parent->m_vars.end()) {
@@ -315,61 +325,101 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 		}
 
 	}
-#ifndef NDEBUG
-	cerr << "Metadata expansion:" << endl;
-	printCC(stack.back().back());
-#endif //NDEBUG
 
-	m_metadata = stack.back().back();
+	m_metadata.clear();
+	std::swap(m_metadata, stack.back().back());
 	return 0;
 }
 
 /**********************************************************
  * Link
  ***********************************************************/
-Chain::Link::Link(std::string sourcefile, unsigned int line, NodeType type,
-		std::string sid, std::string defsource, std::string outspec, 
-		std::string inspec, Chain* parent) 
-		: m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
-		m_sid(getSid(m_id)), m_type(type), m_prevLink(defsource), m_parent(parent)
-
+// Process Constructor
+Chain::Link::Link(std::string sourcefile, unsigned int line, 
+		std::string sid, std::string defsource, 
+		std::string inspec, std::string outspec, std::string cmd, 
+		Chain* parent)
+		: m_cmd(cmd), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
+		m_sid(getSid(m_id)), m_type(PROC), m_prevLink(defsource), m_parent(parent)
 {
+	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
 	const sregex_token_iterator regEnd;
-	m_resolved = true;
-	m_visited = false;
 
 	m_err = 0;
+	m_resolved = false;
+	m_visited = false;
+	m_populated = false;
+	
+	// parse outspec as files
+	m_preinputs.clear();
+	m_preoutputs.clear();
 
-	if(type == INPUT) {
-		// parse inspec as metadata
-		if(mixtureToMetadata(inspec, parent) != 0) {
-			m_err = -1;
-			return;
-		}
-
-		// parse outspec as files
-		m_preinputs.clear();
-//		m_preoutputs.clear();
-		
-		// split out output files, (but ignore commas inside {}
-		auto commaRe = regex("\\s*,(?=[^}]*\\{)\\s*");
-		sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), commaRe, -1);
-		for(; fnIt != regEnd ; ++fnIt) {
-			m_preinputs.push_back(*fnIt);
-//			m_preoutputs.push_back(*fnIt);
-		}
-
-		// parse outputs without resolving external references
-		if(internalFileParse(m_preinputs) != 0) {
-			m_err = -1;
-			return;
-		}
-
-//		if(internalFileParse(m_preoutputs) != 0) {
-//			m_err = -1;
-//			return;
-//		}
+	// split out output files, (but ignore commas inside {}
+	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
+				commaRe, -1); fnIt != regEnd ; ++fnIt) {
+		m_preinputs.push_back(*fnIt);
 	}
+
+	// split out output files, (but ignore commas inside {}
+	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
+				commaRe, -1); fnIt != regEnd ; ++fnIt) {
+		m_preoutputs.push_back(*fnIt);
+	}
+
+#ifndef NDEBUG
+	cerr << "Command: " << cmd<< endl;
+	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
+	cerr << "Output:  "; printC(m_preoutputs); cerr << endl;
+#endif //NDEBUG
+
+	// parse outputs without resolving external references
+	if(resolveInternal() != 0) {
+		m_err = -1;
+		return;
+	}
+}
+
+// Input Constructor
+Chain::Link::Link(std::string sourcefile, unsigned int line, 
+		std::string sid, std::string defsource, 
+		std::string inspec, std::string mixture,
+		Chain* parent)
+		: m_cmd(""), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
+		m_sid(getSid(m_id)), m_type(INPUT), m_prevLink(defsource), m_parent(parent)
+
+{
+	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
+	const sregex_token_iterator regEnd;
+
+	m_err = 0;
+	m_resolved = false;
+	m_visited = false;
+	m_populated = false;
+
+	// expand metadata
+	if(mixtureToMetadata(mixture, parent) != 0) {
+		m_err = -1;
+		return;
+	}
+
+	// split out output files, (but ignore commas inside {}
+	m_preinputs.clear();
+	sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), commaRe, -1);
+	for(; fnIt != regEnd ; ++fnIt) {
+		m_preinputs.push_back(*fnIt);
+	}
+
+#ifndef NDEBUG
+	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
+	cerr << "Metadata Expansion:  "; printCC(m_metadata); cerr << endl;
+#endif //NDEBUG
+
+	// parse inputs without resolving external references
+	if(resolveInternal() != 0) {
+		m_err = -1;
+		return;
+	}
+
 }
 
 
@@ -377,45 +427,50 @@ Chain::Link::Link(std::string sourcefile, unsigned int line, NodeType type,
 /**
  * @brief This function parses and expands any resolvable  {* } variables
  * but ignores external references. It is like a lightweight version of
- * externalFileParse()
+ * resolveExternal()
  *
  * @param files	filepattern list to expand
  *
  * @return error code
  */
 int
-Chain::Link::internalFileParse(list<string>& files)
+Chain::Link::resolveInternal()
 {
 	const std::sregex_iterator regEnd;
-	std::regex expRe("\\{\\*\\s*([^{|]*)\\s*\\}");
+	std::regex expRe("\\{\\*\\s*([^{|]*)\\s*\\}"); //expansion Rgex
+	std::regex extRe("\\{\\s*[^{]*:[^{]*\\s*\\}"); //external argument reg
+	std::regex varRe("\\{\\s*([^{]*)\\s*\\}"); //external argument reg
 	std::smatch args;
+
 #ifndef NDEBUG
-		cerr << "internalFileParse" << endl;
-		printC(files);
+		cerr << "resolveInternal" << endl;
+		printC(m_preinputs);
 		cerr << " <-> ";
 #endif
 
 	bool changed = false;
-	// split out output files
-	for(auto fit = files.begin(); fit != files.end(); ) {
+
+	// if we have metadata, we may be able to resolve things, otherwise, we need
+	// to wait for jobs to provide metadata
+	if(m_metadata.size() > 0)
+		m_resolved = true;
+	else
+		m_resolved = false;
+
+	// Resolve {* } variables
+	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); ) {
 		changed = false;
 
 		// we have a token filename, now expand  {* } variables
 		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
 		for(; expIt != regEnd ; ++expIt) {
+			
+			// resolve varaible references
 			// ignore external references
-			if(expIt->str().find(':') != string::npos) {
+			auto fret = m_parent->m_vars.find((*expIt)[1]);
+			if(fret == m_parent->m_vars.end()) {
 				m_resolved = false;
 				continue;
-			}
-
-			// resolve varaible references
-			auto fret = m_parent->m_vars.find((*expIt)[1]);
-
-			if(fret == m_parent->m_vars.end()) {
-				cerr << "Unknown Reference '" << (*expIt)[1] << " in " 
-						<< m_sourcefile << ":" << m_line << endl;
-				return -1;
 			}
 			
 			changed = true;
@@ -431,24 +486,107 @@ Chain::Link::internalFileParse(list<string>& files)
 			// insert new values after fit
 			fit++;
 			for(auto vit = fret->second.begin(); vit != fret->second.end(); vit++)
-				files.insert(fit, before + (*vit) + after);
+				m_preinputs.insert(fit, before + (*vit) + after);
 
-			fit = files.erase(previt);
+			fit = m_preinputs.erase(previt);
 		}
 
 		if(!changed)
 			fit++;
 	}
+
 #ifndef NDEBUG
-			printC(files);
-			cerr << endl;
+	if(!m_resolved) {
+		cerr << "Unresolved external inputs remain" << endl;
+	}
+#endif //NDEBUG
+
+	cerr << "Database:" << endl;
+	for(auto& v : m_revlabels) {
+		cerr << "'" << v.first << "':'" << v.second << "'" << endl;
+	}
+	cerr << endl;
+
+	/* Try to Resolve everything (if there are external references then this
+	 * will fail */
+	cerr << m_resolved << ", " << m_populated << endl;
+	// fill inputs vector
+	if(m_resolved && !m_populated && m_metadata.size() > 0) {
+		cerr << "Populating " << m_metadata.size() << endl;
+		m_inputs.clear();
+		m_outputs.clear();
+
+		m_inputs.resize(m_metadata.size());
+		for(unsigned int jj = 0 ; jj < m_inputs.size(); jj++) {
+			m_inputs[jj].resize(m_preinputs.size());
+			
+			auto it = m_preinputs.begin();
+			for(unsigned int aa = 0; it != m_preinputs.end(); aa++, it++) {
+				cerr << *it << endl;
+				string str = *it;
+
+				cerr << str << endl;
+				while(std::regex_search(str, args, varRe)) {
+					cerr << args[0].str() << endl;
+					cerr << args[1].str() << endl;
+					auto lookup = m_revlabels.find(args[1].str());
+
+					// if we can't find the variable, then give up for now
+					if(lookup == m_revlabels.end()) {
+						m_resolved = false;
+						m_populated = false;
+						m_inputs.clear();
+						m_outputs.clear();
+						return 0;
+					}
+					string before = args.prefix();
+					string after = args.suffix();
+					string val = m_metadata[jj][lookup->second];
+					str = before+val+after;
+					cerr << args[1].str() << endl;
+					cerr << before << endl;
+					cerr << after << endl;
+					cerr << val << endl;
+					cerr << lookup->first << endl;
+					cerr << str << endl;
+				}
+				
+				m_inputs[jj][aa] = str;
+
+#ifndef NDEBUG
+				cerr << "Final Result : " << m_inputs[jj][aa] << endl;
+#endif //NDEBUG
+
+			}
+		}
+
+		if(m_resolved)
+			m_populated = true;
+	}
+
+#ifndef NDEBUG
+	cerr << "Populated? " << m_populated << endl;
+	cerr << "Resolved? " << m_resolved << endl;
+	printC(m_preinputs);
+	cerr << endl;
+	cerr << "Inputs: " << endl;
+	printCC(m_inputs);
+	cerr << endl;
 #endif
+	return 0;
+}
+
+int
+Chain::Link::run()
+{
+
 	return 0;
 }
 
 /**
  * @brief This function parses and expands any resolvable  {* } variables
- * by recursing into external references. 
+ * by recursing into external references. If we manage to resolve all the
+ * inputs, then we populate the inputs vector with filename
  *
  * @param files	filepattern list to expand
  *
@@ -603,6 +741,237 @@ int Chain::Link::resolveExternal(list<string>& stack)
  * Chain
  ***********************************************************/
 
+int
+Chain::parseFile(string filename) 
+{
+	cerr << "Parsing: " << endl;
+	std::string idstR = "\\s*([0-9.]*)\\s*:";			// id string regex
+	std::string arstR = "\\s*\\[([^\\]\\s]*)\\]\\s*"; 	// array string regex
+	std::string nonwR = "\\s*([^\\s]+)\\s*"; 			// non-white regex
+	regex varRe("\\s*([[:alnum:]]*)\\s*=\\s*([\\{\\},/_[:alnum:]]*)\\s*");
+	regex commaRe(",(?![^{]*\\})");
+//	regex inputRe("\\s*([0-9.]*)\\s*:\\s*(?:input|i)\\s*:\\s*\\[(.*)\\]\\s*=(\\s*[^\\s]+\\s*)");
+	regex inputRe(idstR+"\\s*(?:input|i)\\s*:"+arstR+"~"+nonwR);
+	regex cmdRe(idstR+"\\s*(?:proc|p)\\s*:"+arstR+"\\s*->\\s*"+arstR+"(.*)");
+	regex contRe("(.*)\\.\\.\\.\\s*");
+	regex emptyRe("\\s*");
+	regex curlyRe("\\{\\s*([^{]*)\\s*\\}"); // Curly-brace search
+	const sregex_token_iterator regEnd;
+	std::smatch args;
+
+	vector<int> prevleaf;
+	vector<int> curleaf; 
+
+	string linebuff; // contains the complete line (in case of line ending with ...)
+	string line;
+	ifstream ifs(filename);
+	for(int linenum = 1; !ifs.eof(); linenum++) {
+		std::getline(ifs,linebuff);
+
+		// remove comments 
+		linebuff = linebuff.substr(0,linebuff.find('#'));
+		cerr << linebuff << endl;
+	
+		// line continued on the next line, just append without ...
+		if(regex_match(linebuff, args, contRe)) {
+			line = line + args[1].str();
+			continue;
+		} else 
+			line = line + linebuff;
+
+		cerr << line << endl;
+		if(regex_match(line, args, emptyRe)) {
+			// do nothing
+		} else if(regex_match(line, args, varRe)) {
+		/**********************************************
+		 * Variable declaration: 
+		 *		match var=val[,val[,val[...]]]
+		 *********************************************/
+#ifndef NDEBUG
+			cerr << "---------------------------------------" << endl;
+			cerr << "Variables line:" << endl;
+			cerr << line << endl;
+			cerr << "---------------------------------------" << endl;
+#endif// NDEBUG
+
+			if(args.size() != 3) {
+				cerr << "On line " << line << "\nError variables are of type "
+					"name=val[,val[...]]\n";
+				return -1;
+			}
+			
+			string varname = args[1];
+			string value = args[2];
+
+			auto ret = m_vars.insert(pair<string,list<string>>(varname,
+						list<string>()));
+			if(ret.second) {
+				// Split comma separated values into tokens
+				sregex_token_iterator regIt(value.cbegin(), value.cend(), commaRe, -1);
+				for(; regIt != regEnd ; ++regIt) {
+					ret.first->second.push_back(*regIt);
+					auto newpos = ret.first->second.end();
+					newpos--;
+
+					list<string> tmplist ;
+					// expand any variables
+					while(std::regex_search(value, args, curlyRe)) {
+						cerr << args[0].str() << endl;
+						cerr << args[1].str() << endl;
+						auto lookup = m_vars.find(args[1].str());
+
+						if(lookup == m_vars.end()) {
+							cerr << "Error! Undefined reference in " 
+								<< filename << ":" << linenum << endl;
+							cerr << varname << " references " << args[1] 
+								<< " which is undefined" << endl;
+							return -1;
+						}
+
+						for(auto& vv : lookup->second) {
+							tmplist.push_back(
+						}
+
+					}
+
+
+					for(auto vv : lookup->second) {
+						
+					}
+					value = args.prefix().str()+lookup->second+args.suffix().str(); 
+				}
+
+			} else {
+				cerr << "Warning: redeclaration of " << varname << " in " 
+					<< filename << ":" << linenum << endl;
+				cerr << varname << "=" << value << endl;
+				cerr << "Value will NOT be updated!" << endl;
+			}
+			
+		} else if(regex_match(line, args, inputRe)) {
+			/*****************************************
+			 * Input Declaration
+			 * 		match 
+			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = 
+			 *				({prov}[*,{prov}[*,{prov}]])
+			 *****************************************/
+			
+#ifndef NDEBUG
+			cerr << "---------------------------------------" << endl;
+			cerr << "Input line:" << endl;
+			cerr << line << endl;
+			cerr << "---------------------------------------" << endl;
+#endif //NDEBUG
+
+			/* Handle default ID from prevleaf, or, if this is the first line
+			 * then just set previous to current*/
+			if(args[1].str().empty() && prevleaf.empty()) {
+				cerr << "Error, first Link MUST have a identifier: "
+					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
+				return -1 ;
+			} else if(prevleaf.empty()) {
+				prevleaf = getId(args[1]);
+			} else if(args[1].str().empty()) {
+				curleaf = prevleaf;
+				curleaf.back()++;
+			} else {
+				curleaf = getId(args[1].str());
+			}
+
+			/* create new data structure */
+			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
+						getSid(curleaf), getSid(prevleaf), 
+						args[2], args[3], this));
+
+			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
+						newleaf->m_id, newleaf));
+			if(ret.second == false) {
+				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
+					<< filename << ":" << linenum << endl;
+				return -1;
+			}
+		} else if(regex_match(line, args, cmdRe)) {
+#ifndef NDEBUG
+			cerr << "---------------------------------------" << endl;
+			cerr << "Command line:" << endl;
+			cerr << line << endl;
+			cerr << "---------------------------------------" << endl;
+#endif //NDEBUG
+
+			/* Handle default ID from prevleaf, or, if this is the first line
+			 * then just set previous to current*/
+			if(args[1].str().empty() && prevleaf.empty()) {
+				cerr << "Error, first Link MUST have a identifier: "
+					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
+				return -1 ;
+			} else if(prevleaf.empty()) {
+				prevleaf = getId(args[1]);
+			} else if(args[1].str().empty()) {
+				curleaf = prevleaf;
+				curleaf.back()++;
+			} else {
+				curleaf = getId(args[1].str());
+			}
+
+			/* create new data structure */
+			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
+						getSid(curleaf), getSid(prevleaf), 
+						args[2], args[3], args[4], this));
+
+			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
+						newleaf->m_id, newleaf));
+			if(ret.second == false) {
+				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
+					<< filename << ":" << linenum << endl;
+				return -1;
+			}
+		}
+
+		line = "";
+	}
+
+//	list<string> stack;
+//	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+//
+//		// prepare for traversal
+//		for(auto vv : m_links) 
+//			vv.second->m_visited = false;
+//
+//		// stack is just for debugging purposes of the user
+//		stack.clear();
+//
+//		// resolve external references in inputs of current link 
+//		// by resolving parents references. Fails if a cycles is
+//		// detected. (ie traversal tries to revisit a node)
+//		if(it->second->resolveExternal(stack) != 0) {
+//			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
+//				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+//			m_err = -1;
+//
+//			cerr << "Offending chain:" << endl;
+//			for(auto vv : stack) {
+//				cerr << vv << " <- ";
+//			}
+//			cerr << endl;
+//			return -1;
+//		}
+//	}
+//
+//	// resolve variables
+//	// todo
+//	//
+//	
+//	for(auto it1 = m_vars.begin(); it1 != m_vars.end(); it1++) {
+//		cerr << it1->first;
+//		for(auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+//			cerr << "\t" << *it2 << endl;
+//
+//		}
+//	}
+
+	return 0;
+}
+
 /**
  * @brief Parsing works as follows
  
@@ -621,172 +990,10 @@ int Chain::Link::resolveExternal(list<string>& stack)
  */
 Chain::Chain(string filename) : m_err(0)
 {
-	cerr << "Parsing: " << endl;
-	auto varRe = regex("\\s*([^:=\\s]*)\\s*=\\s*([^:=\\s]*)\\s*");
-	auto commaRe = regex("(\\s*[^,]+\\s*)");
-	auto inputRe = regex("\\s*([0-9.]*)\\s*:\\s*(?:input|i)\\s*:\\s*\\[(.*)\\]\\s*=(\\s*[^\\s]+\\s*)");
-	auto cmdRe = regex("\\s*([0-9.]*)\\s*:\\s*(?:proc|p)\\s*:\\s*\\[(.*)\\]\\s*=\\s*(.*)\\s*");
-	auto emptyRe = regex("\\s*");
-	const sregex_token_iterator regEnd;
-	std::smatch args;
-
-	vector<int> prevleaf;
-	vector<int> curleaf; 
-
-	string line;
-	ifstream ifs(filename);
-	std::getline(ifs,line);
-	for(int linenum = 1; !ifs.eof(); linenum++) {
-
-		// remove comments 
-		line = line.substr(0,line.find('#'));
-	
-		if(regex_match(line, args, emptyRe)) {
-			// do nothing
-		} else if(regex_match(line, args, varRe)) {
-		/**********************************************
-		 * Variable declaration: 
-		 *		match var=val[,val[,val[...]]]
-		 *********************************************/
-#ifndef NDEBUG
-			cerr << "Declare:'"  << line << "'" << endl;
-#endif// NDEBUG
-
-			if(args.size() != 3) {
-				cerr << "On line " << line << "\nError variables are of type "
-					"name=val[,val[...]]\n";
-				m_err = -1;
-				return;
-			}
-			
-			string varname = args[1];
-			string value = args[2];
-			
-#ifndef NDEBUG
-			cerr << "'" << varname << "=" << value << "'" << endl;
-#endif // NDEBUG
-			auto ret = m_vars.insert(pair<string,list<string>>(varname,
-						list<string>()));
-			if(ret.second == false) {
-				cerr << "Warning: redeclaration of " << varname << " in " 
-					<< filename << ":" << linenum << endl;
-			}
-				
-			// Iterate Through Non-comma values
-			sregex_token_iterator regIt(value.cbegin(), value.cend(), commaRe);
-			for(; regIt != regEnd ; ++regIt) {
-				ret.first->second.push_back(*regIt);
-			}
-		
-		} else if(regex_match(line, args, inputRe)) {
-			/*****************************************
-			 * Input Declaration
-			 * 		match 
-			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = 
-			 *				({prov}[*,{prov}[*,{prov}]])
-			 *****************************************/
-
-			/*
-			 * Handle ids
-			 */
-			if(args[1].str().empty() && prevleaf.empty()) {
-				cerr << "Error, first Link MUST have a identifier: "
-					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
-				m_err = -1;
-				return;
-			}
-
-			// just set previous leaf to current leaf
-			if(prevleaf.empty()) {
-				prevleaf = getId(args[1]);
-			}
-
-			// if current leaf was left blank, just default to the next value
-			// from prevleaf
-			if(args[1].str().empty()) {
-				curleaf = prevleaf;
-				curleaf.back()++;
-			} else {
-				curleaf = getId(args[1].str());
-			}
-
-			/*
-			 * create new data structure
-			 */
-			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
-						Link::INPUT, getSid(curleaf), getSid(prevleaf), 
-						args[2], args[3], this));
-
-			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
-						newleaf->m_id, newleaf));
-			if(ret.second == false) {
-				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
-					<< filename << ":" << linenum << endl;
-				m_err = -1;
-				return;
-			}
-//		} else if(regex_match(line, args, cmdRe)) {
-//			/*****************************************
-//			 * Process Declaration
-//			 * 		match 
-//			 *		uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = 
-//			 *				cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
-//			 *****************************************/
-//			// check if this is an initializing line (input files)
-//			
-//			auto newleaf = shared_ptr<Proc>(new Input(filename, linenum, 
-//						args[1], args[2], args[3], this));
-//
-//			auto ret = m_proc.insert(pair<vector<int>,shared_ptr<Proc>>(
-//						getId(sid), newleaf));
-//			if(ret.second == false) {
-//				cerr << "Error: redeclaration of " << sid << " in " 
-//					<< filename << ":" << linenum << endl;
-//				m_err = -1;
-//				return;
-//			}
-		}
-
-		std::getline(ifs,line);
+	int ret = parseFile(filename);
+	if(ret != 0) {
+		m_links.clear();
+		m_vars.clear();
+		m_err = -1;
 	}
-
-	list<string> stack;
-	for(auto it = m_links.begin(); it != m_links.end(); it++) {
-
-		// prepare for traversal
-		for(auto vv : m_links) 
-			vv.second->m_visited = false;
-
-		// stack is just for debugging purposes of the user
-		stack.clear();
-
-		// resolve external references in inputs of current link 
-		// by resolving parents references. Fails if a cycles is
-		// detected. (ie traversal tries to revisit a node)
-		if(it->second->resolveExternal(stack) != 0) {
-			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
-				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
-			m_err = -1;
-
-			cerr << "Offending chain:" << endl;
-			for(auto vv : stack) {
-				cerr << vv << " <- ";
-			}
-			cerr << endl;
-			return ;
-		}
-	}
-
-	// resolve variables
-	// todo
-	//
-	
-	for(auto it1 = m_vars.begin(); it1 != m_vars.end(); it1++) {
-		cerr << it1->first;
-		for(auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-			cerr << "\t" << *it2 << endl;
-
-		}
-	}
-
 }

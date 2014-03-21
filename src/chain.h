@@ -45,6 +45,7 @@ class Chain
 {
 public:
 	Chain(std::string filename);
+	int parseFile(std::string filename);
 
 	std::ostream& operator<<(std::ostream &o) 
 	{
@@ -71,13 +72,25 @@ class Chain::Link
 	public:
 		enum NodeType {INPUT, PROC};
 
-		Link(std::string sourcefile, unsigned int line, NodeType type,
-				std::string sid, std::string defsource, std::string outspec, 
-				std::string inspec, Chain* parent);
+		//process initialize
+		Link(std::string sourcefile, unsigned int line, 
+				std::string sid, std::string defsource, 
+				std::string inspec, std::string outspec, std::string cmd,
+				Chain* parent); 
+
+		//input initialize
+		Link(std::string sourcefile, unsigned int line, 
+				std::string sid, std::string defsource, 
+				std::string inspec, std::string outspec, 
+				Chain* parent);
 
 		// for traversal
 		bool m_visited;
 		bool m_resolved;
+		bool m_populated;
+		
+		// command
+		const std::string m_cmd;
 
 		// basic info
 		const std::string m_sourcefile;
@@ -89,10 +102,11 @@ class Chain::Link
 		
 		int m_err;
 
-		int resolveExternal(std::list<std::string>&);
+		int resolveExternal(std::list<std::string>& stack);
+		int populate();
+
+		int run();
 	protected:
-
-
 
 		// J x A = jobs x args
 		std::vector<std::vector<std::string>> m_inputs;
@@ -106,7 +120,8 @@ class Chain::Link
 		std::vector<std::vector<std::string>> m_metadata;
 
 		// labels for columns of m_metadata, 
-		std::vector<std::string> m_labels;
+		std::vector<std::string> m_labels;					// column -> label
+		std::unordered_map<std::string, int> m_revlabels; 	// label -> colum
 
 		// lookup table for jobs, 
 		// M x N x J' = rows indexed by varnmae corresponding to 
@@ -129,6 +144,7 @@ class Chain::Link
 		friend Chain;
 
 		int mixtureToMetadata(std::string spec, const Chain* parent);
-		int internalFileParse(std::list<std::string>& files);
+		int resolveInternal();
+
 };
 

@@ -6,8 +6,8 @@
 #foreach t1 in subject:
 #    foreach f in fmri:
 #      flirt -in t1 -ref f -out t1_in_fmri -tfm trans.mat
-#	   flirt -init trans.mat -inv f -out fmri_in_t1 
-# 
+#	   flirt -init trans.mat -inv f -out fmri_in_t1
+#
 #foreach t1 in subject:
 #    foreach d in dti:
 #      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
@@ -23,29 +23,37 @@
 #
 #note wildcard should resolve to a single input
 base=/datadir
-prefix  =   {base}/{subject}/pipe   
+prefix  =   {base}/{subject}/pipe
 subject=10107,10343,1
 fmri=fmri_year1,fmri_year2
 dti=dti_year1,dti_year2
-prefix={base}/{subject}/pipe
+prefix=//{base}/{subject}/pipe
 
 # Types of lines:
 #
-# Variable declaration (use ',' for an array):
+# Variable (possibly array) declaration (use ',' for an array):
 #	a=b[,c[,d...]]
 #
 # Declaration of input files:
-#	uint[.int[.int]]:s[ource]:[file[,file[,...]]] = ({mvar}[*,{mvar}[*,{mvar}]])
+#	LINKSPEC:i:[inspec,...] ~ {mvar}
+#	LINKSPEC:i:[inspec,...] ~ {mvar}*{mvar}
+#	LINKSPEC:input:[inspec,...] ~ ({mvar},{mvar})*({mvar})
 #
 #		either :i: or :input: may be used
 #
-#		where mvar are variables from variable declaration above that will be 
+#		LINKSPEC is a link specifier, a list of ints separated by periods, it
+#			just needs to be unique, ie. any of these are ok:
+#			1.2.3:
+#			1:
+#			323.1.3213.5.3:
+#
+#		where mvar are variables from variable declaration above that will be
 #		iterated through. Provinences can be combined using either '*' or ','
-#		to determine how mvar variables will be iterated through. 
+#		to determine how mvar variables will be iterated through.
 #
 #		* will use
 #			every possible combination of the two, ie: {subj}*{fmri} would generate
-#			the 6 file pairs: 
+#			the 6 file pairs:
 #
 #				(10107,fmri_year1),(10107,fmri_year2),(10343,fmri_year1),
 #				(10343,fmri_year2),(1,fmri_year1),(1,fmri_year2)
@@ -61,45 +69,90 @@ prefix={base}/{subject}/pipe
 #			
 #			(fmri_year1,dti_year1),(fmri_year2,dti_year2)
 #		
-#		() may be used combine, but only one operator type is allowed in a set of 
+#		() may be used combine, but only one operator type is allowed in a set of
 #			parenthesis.
 #
-# Declaration of a process
-#	uint[.uint[...]]:p[roc]:[ftemp[,ftemp[...]]] = cmd {<inspec} {>outspec} {!<inspec} {!>outspec}
+#		inspec the following fomats are accepted:
+#			{} or {LINKSPEC:} or {LINKSPEC:ARGNUM} or
+#			{*} or {*LINKSPEC:} or {*LINKSPEC:ARGNUM} or
+#			{*|CONTROL} or {*LINKSPEC:|CONTROL} or {*LINKSPEC:ARGNUM|CONTROL}
 #
-#		where 
+#			{}                        	Default LINK and argument
+#
+#			{LINKSPEC:}               	Default argument (0) from LINKSPEC
+#
+#			{LINKSPEC:ARGNUM}         	Argument number ARGNUM from link LINKSPEC		
+#
+#			{*LINKSPEC:ARGNUM}        	Every process of LINKSPEC has an output ARGNUM,
+#			                          	 	place all of those outputs as inputs to the
+#			                          	 	current link. i.e. For 10 subjects if the
+#			                          	 	LINKSPEC is the skullstripping this would
+#			                          	 	place all the skull stripped outputs as
+#			                          	 	inputs to the current job.
+#			{*}                       	Same as above, but use output 0, and the output	
+#			                          	 	from the default (preceeding line) LINK
+#
+#			{*LINKSPEC:ARGNUM|CONTROL}	Same as above, but limit the scale of the of
+#			                          	 	the matching. All the inputs will have the
+#			                          		same CONTROL metadata value. So then if you
+#			                          	 	have 10 subjects with 2 fMRI datasets, and
+#			                          	 	set SUBJECT as the control, then only
+#			                          	 	outputs for the two different fMRI runs
+#			                          	 	will be added each LINK. And each job will
+#			                          	 	be performed on a per-subject basis.
+#
+#			{*|CONTROL}               	Same as above, but use output 0, and the output	
+#											from the default (preceeding line) LINK
+#
+#			All arguments are optional. The default LINKSPEC is the job on the
+#			preceeding line. The default ARGNUM is 0. So by default the first
+#			output of the preceeding line will be used.
+#
+#			Preceeding the entire pattern with * will cause the argument from
+#			EVERY job to be used for a single job. Thus if you had 10 subject
+#			with 10 jobs on the previous job, this will cause all of them to
+#			be placed as input. |CONTROL can be used to limit that effect. So
+#			if you have 10 subjects with 2 fMRI runs, and 2 DTI runs and the
+#			previous line operated on all of those individually,
+#			{*|SUBJECT} would use the SUBJECT metadata (created with
+#			SUBJECT=1,2,3,4 before) as the constant for each job,
+#			and all fMRI and DTI data will be placed as inputs to each
+#			job, and the number of jobs will be decreased to the number
+#			of subjects.
+#
+#
+# Declaration of a process
+#	LINKSPEC:p:[inspec,...] -> [outspec,...] = cmd {argspec} {argspec}  ...
+#	LINKSPEC:proc:[inspec,...] -> [outspec,...] = cmd {argspec} {argspec} ...
+#
+#		where
 #
 #			either :p: or :proc: may be used
 #
-#			ftemp is a file postfix, the job number will be prefixed to 
+#			outspec is a file postfix, the job number will be prefixed to
 #				provide a unique output
+#
+#			argspec formats are as follows:
+#
+#				{ARGRANGE} or {ARGRANGE%PATTERN%REPLACE} or {ARGRANGE%PATTERN%REPLACE}
+#
+#				ARGRANGE is either a single number, two numbers separated by a
+#				dash, or a comma separated chain of both ie, all the following
+#				are valid:
+#				{0} {0-9} {0-3,5,89}
+#
+#				If no ARGRANGE is provided then all the inputs will be put on the
+#					command line
+#
+#				%PATTERN%REPLACE will use regular expression to pefrom a string
+#					replacement. See rgx for the PATTERN and fmt for REPLACE:
+#					http://www.cplusplus.com/reference/regex/match_replace/
+#
+#			inspec See input :source: description
 #
 #			cmd is a command line program to run
 #
-#			{<inspec},{>outspec} variables are included on the command line,
-#				and will be replaced with the corresponding input ( {<file} ) and
-#				output ( {>file} )
-#
-#			{!<inspec},{!>outspec} variables are implicit (ie not included on
-#				the command line), but should be generated by the cmd. So for
-#				instance if the output is a directory, that gets filled with files
-#				the dir should be: {>outdir} and the files should all be listed:
-#				{!>outfile} {!>outfile}...
-#
-#			inspec is of the form 'jspec:i-j@prefix' where all arguments are optional. 
-#				
-#				jspec indicates a specific job which produces the 
-#					output for the desired input, (default is the preceeding job spec)
-#
-#				i-j indicates a range of output numbers from the given jobspec, 
-#					-j may be omitted to specify a single output
-#				
-#				@prefix indicates variables to prepend to each input from i-j, so
-#					for instance {0-2@-i } would cause -i out0 -i out1 -i out2 -i 
-#					to be added to the command line where out0,out1,out2 are outputs
-#					of the previous job
-#
-#			outspec is identical in form to ftemp, and will be prepended with a 
+#			outspec is identical in form to ftemp, and will be prepended with a
 #				with a job identifier
 #			
 
@@ -107,7 +160,7 @@ prefix={base}/{subject}/pipe
 #foreach t1 in subject:
 #    foreach f in fmri:
 #      flirt -in t1 -ref f -out t1_in_fmri -tfm trans.mat
-#	   flirt -init trans.mat -inv f -out fmri_in_t1 
+#	   flirt -init trans.mat -inv f -out fmri_in_t1
 #
 # ({base}*{fmri}*{subject})  - generates every possible combination:
 # (/datadir,fmri_year1,10107),
@@ -117,7 +170,7 @@ prefix={base}/{subject}/pipe
 # (/datadir,fmri_year2,10343),
 # (/datadir,fmri_year2,1)
 #
-# then this produces the following list of arguments: 
+# then this produces the following list of arguments:
 #	[(arg0_to_proc0,arg1_to_proc0), (arg0_to_proc1,arg1_to_proc1) ... ]
 #
 #[(/datadir/10107/fmri_year1*.nii.gz,	/datadir/10107/SAGMPRAGE*.nii.gz),
@@ -127,19 +180,19 @@ prefix={base}/{subject}/pipe
 # (/datadir/10343/fmri_year2*.nii.gz,	/datadir/10343/SAGMPRAGE*.nii.gz),
 # (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/SAGMPRAGE*.nii.gz)]
 #
-0.0:input:[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] = ({base}*{subject}*{fmri})
-0.1:proc:[t1_in_fmri.nii.gz,trans.mat] = flirt -in {<0} -ref {<1} -out {>t1_in_fmri.nii.gz} -tfm {>trans.mat}
-0.2:proc:[fmri_in_t1.nii.gz] = flirt -init {<1} -ref {<0.0:1} -inv -out {>fmri_in_t1.nii.gz}
+0.0:input:[{base}/{subject}/{fmri}*.nii*,{base}/{subject}/SAGMPRAGE*.nii*] ~ ({base}*{subject}*{fmri})
+0.1:proc: [{0},{1}]->[t1_in_fmri.nii.gz,trans.mat] 	flirt -in {0} -ref {1} -out {2} -tfm {3}
+0.2:proc: [{1},{0.0:1}] -> [fmri_in_t1.nii.gz] 		flirt -init {0} -ref {1} -inv -out {3}
 
 ### this would contatinate all the fMRI images from each subject:
-##0.3:i:[{*0.2:0|fmri}] = {base}*{subject}
-##0.3:proc:[fmri_in_t1.nii.gz] = flirt -init {<1} -ref {<0.0:1} -inv -out {>fmri_in_t1.nii.gz}
+##0.3:i:[{*0.2:0|fmri}] ~ {base}*{subject}
+##0.3:proc:[{1},{0.0:1}]->[fmri_in_t1.nii.gz] flirt -init {0} -ref {1} -inv -out {2}
 
 #foreach t1 in subject:
 #    foreach d in dti:
 #      flirt -in t1 -ref d -out t1_in_fmri -tfm trans.mat
-1.0:i:[{base}/{subject}/{dti}.nii.gz,{base}/{subject}/SAGMPRAGE.nii.gz] = ({base}*{subject}*{dti})
-1.1:p:[trans.mat] = flirt -in {<0} -ref {<1} -out {>t1_in_fmri.nii.gz} -tfm {>out.tfm}
+1.0:i:[{prefix}/{subject}/{dti}.nii.gz,{base}/{subject}/SAGMPRAGE.nii.gz] ~ ({base}*{subject}*{dti})
+1.1:p: [{0},{1}] -> [out.nii.gz,trans.mat] flirt -in {0} -ref {1} -out {2} -tfm {3}
 
 #combine corresponding elements from two lists
 #foreach base:
@@ -163,8 +216,8 @@ prefix={base}/{subject}/pipe
 # (/datadir/10343/fmri_year2*.nii.gz,	/datadir/10343/dti_year2*.nii.gz),
 # (/datadir/1/fmri_year2*.nii.gz,		/datadir/1/dti_year2*.nii.gz)]
 
-2.0:i:[{base}/{subject}/{fmri}*.nii.gz,{base}/{subject}/{dti}*.nii.gz] = ({base}*{subject}*({fmri},{dti}))
-2.1:p:[ratio.nii.gz] = divide -i {<0} -i {<1} -o {>ratio.nii.gz}
+2.0:i:[{base}/{subject}/{fmri}*.nii.gz,{base}/{subject}/{dti}*.nii.gz] ~ ({base}*{subject}*({fmri},{dti}))
+2.1:p:[{0},{1}] -> [ratio.nii.gz] divide -i {0} -i {1} -o {2}
 
 ##register between corresponding fMRI across subjects (collapse subjects)
 #foreach fmri:
@@ -191,8 +244,8 @@ prefix={base}/{subject}/pipe
 #
 # even though 6 variants are generated, only 2 jobs are created
 
-3.0:i:[{base}/{*subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
-3.1:p:[fsubj1_in_fsubj2.nii.gz,trans.mat] = flirt -in {<0} -i {<1} -o {>fsubj1_in_fsubj2} -tfm {>trans.mat}
+3.0:i:[{base}/{*subject}/{fmri}*.nii.gz] ~ ({base}*{fmri}*{subject})
+3.1:p:[{0},{1}] -> [fsubj1_in_fsubj2.nii.gz,trans.mat] flirt -in {0} -i {1} -o {2} -tfm {3}
 
 ###### FUTURE ############
 #### create a lot of outputs
@@ -201,25 +254,25 @@ prefix={base}/{subject}/pipe
 ### This would generate a runtime-determined number of outputs
 ##5.0:i:[{base}/{subject}/{fmri}*.nii.gz] = ({base}*{fmri}*{subject})
 ##5.1:p:[odir/*] = fslsplit {0} [odir/*] basename -t
-##5.2:p:[fmri] = fslmerge -t [fmri] {} #{5.1:} could also be used as input 
+##5.2:p:[fmri] = fslmerge -t [fmri] {} #{5.1:} could also be used as input
 ##5.3:p:[fmri_t0t5] = fslmerge -t [fmri] {5.1:0-5} # just get the first 5 volumes
 ##
 ### takes the first 5 inputs from 5.1, prepends -add then puts them on the CLI
 ### produces fslmaths -add sutch that it produces:
 ### $ fslmaths fmri0.nii.gz -add fmri1.nii.gz -add fmri2.nii.gz -add fmri3.nii.gz sum.nii.gz
-##5.3:p:[sum] = fslmaths {5.1:0} {5.1:1-3@-add } [sum] 
+##5.3:p:[sum] = fslmaths {5.1:0} {5.1:1-3@-add } [sum]
 ##
-##5 :source: [outspec[,outspec[...]]] = script.ent {<blah} {<blah} {>outspec} 
+##5 :source: [outspec[,outspec[...]]] = script.ent {<blah} {<blah} {>outspec}
 
 # this just creates a link to 3.1's outputs
-6.0:i:[{3.1:}] = {base}*{fmri}*{subject}
+6.0:i:[{3.1:}] ~ {base}*{fmri}*{subject}
 
 # this expands all the outputs of 3.1
-7.0:i:[{*3.1:0}] = {base}*{fmri}*{subject}
+7.0:i:[{*3.1:0}] ~ {base}*{fmri}*{subject}
 
-8.0:i:[{*3.1:0-2,4|base}] = {base}*{fmri}*{subject}
-9.0:i:[{*3.1:|base}] = {base}*{fmri}*{subject}
-10.0:i:[{*0|base}] = {base}*{fmri}*{subject}
-11.0:i:[{*|base}] = {base}*{fmri}*{subject}
-12.0:i:[{*|base,subject}] = {base}*{fmri}*{subject}
+8.0:i:[{*3.1:0-2,4|base}] ~ {base}*{fmri}*{subject}
+9.0:i:[{*3.1:|base}] ~ {base}*{fmri}*{subject}
+10.0:i:[{*0|base}] ~ {base}*{fmri}*{subject}
+11.0:i:[{*|base}] ~ {base}*{fmri}*{subject}
+12.0:i:[{*|base,subject}] ~ {base}*{fmri}*{subject}
 
