@@ -16,7 +16,7 @@ using std::sregex_token_iterator;
 
 using namespace std;
 
-int expand(std::string expression, std::list<int>& lout, std::string& sout)
+int expand(list<string>::iterator& exp, list<string>& lout)
 {
 	const std::sregex_iterator regEnd;
 	const std::regex expRe("(\\{\\*?"
@@ -26,11 +26,11 @@ int expand(std::string expression, std::list<int>& lout, std::string& sout)
 	const std::regex rangeRe("(?:([0-9]+)-([0-9]+)|([0-9]+))");
 	
 	std::smatch args;
-	lout.clear();
 	string prefix;
 	string suffix;
+	std::list<int> intlist;
 
-	if(regex_search(expression, args, expRe)) {
+	if(regex_search(*exp, args, expRe)) {
 		prefix = args[1].str();
 		suffix = args[3].str();
 
@@ -49,20 +49,31 @@ int expand(std::string expression, std::list<int>& lout, std::string& sout)
 					return -1;
 				}
 				for( ; a <= b; a++)
-					lout.push_back(a);
+					intlist.push_back(a);
 			} else if(!single.empty()) {
-				lout.push_back(atoi(single.c_str()));
+				intlist.push_back(atoi(single.c_str()));
 			}
 		}
 	} else {
-		cerr << "Error, syntax not understood: " << expression << endl;
+		cerr << "Error, syntax not understood: " << *exp << endl;
 		return -1;
 	}
 
 	ostringstream oss; 
-	for(auto& v : lout)
-		oss << prefix << v << suffix << ", ";
-	sout = oss.str();
+	ostringstream outoss; 
+
+	// nothing to splice in
+	if(intlist.empty()) 
+		return 0;
+
+	auto init = exp;
+	for(auto it = intlist.begin(); it != intlist.end(); it++) {
+		oss.str("");
+		oss << prefix << *it << suffix;
+		lout.insert(init, oss.str());
+		exp--;
+	}
+	lout.erase(init);
 	return 0;
 }
 
@@ -76,7 +87,7 @@ int main(int argc, char** argv)
 			"find a file.", ' ',__version__);
 
 	// arguments
-	TCLAP::ValueArg<std::string> a_regex("e","exp","Expression '{*23.2:1-5,52-5}'"
+	TCLAP::ValueArg<string> a_regex("e","exp","Expression '{*23.2:1-5,52-5}'"
 				,true,"*","regexp");
 	cmd.add(a_regex);
 
@@ -87,16 +98,19 @@ int main(int argc, char** argv)
 	 * Main Processing
 	 */
 	
-	list<int> values;
-	string expanded;
-
-	if(expand(a_regex.getValue(), values, expanded) < 0) {
+	list<string> values;
+	values.push_back(a_regex.getValue());
+	auto it = values.begin();
+	if(expand(it, values) < 0) {
 		cerr << "ERROR" << endl;
 		return -1;
 	}
 	
 	cerr << "Input: " << a_regex.getValue() << endl;
-	cerr << "Expanded to: " << expanded << endl;
+	cerr << "Expanded to: " << endl;
+	for(const auto& vv : values) {
+		cerr << "\t" << vv << endl;
+	}
 
 	// done, catch all argument errors
 	} catch (TCLAP::ArgException &e)  // catch any exceptions

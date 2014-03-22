@@ -57,7 +57,7 @@ public:
 	int resolveTree();
 
 private:
-	std::map<std::vector<int>,std::shared_ptr<Link>, vintComp> m_links;
+	std::map<std::vector<int>,Link, vintComp> m_links;
 	std::map<std::string,std::list<std::string>> m_vars;
 
 //	std::vector<int> getId(std::string);
@@ -72,7 +72,6 @@ private:
 class Chain::Link
 {
 	public:
-		class Argument;
 		enum NodeType {INPUT, PROC};
 
 		//process initialize
@@ -115,9 +114,29 @@ class Chain::Link
 
 	protected:
 
-		// J x A = jobs x args
-		std::vector<Argument> m_arguments;
-		std::vector<std::vector<std::string>> m_inputs;
+		struct InputT
+		{
+			InputT(Link* src, int pn, int on) : 
+				source(src), procnum(pn), outnum(on), filename("") {};
+
+			InputT(string fn) :
+				source(NULL), procnum(-1), outnum(-1), filename(fn) {};
+			
+			InputT() :
+				source(NULL), procnum(-1), outnum(-1), filename("") {};
+
+			// if the input is the output of something else, keep track 
+			// of it
+			Link* source;
+			int procnum;
+			int outnum;
+			
+			// otherwise just store the filename
+			string filename;
+		};
+
+		// J x A = jobs x (in/out) args
+		std::vector<std::vector<InputT>> m_inputs;
 		std::vector<std::vector<std::string>> m_outputs;
 
 		// J x M = jobx x relavent metadata

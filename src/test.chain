@@ -35,7 +35,7 @@ prefix=//{base}/{subject}/pipe
 #	a=b[,c[,d...]]
 #
 # Declaration of input files:
-#	LINKSPEC:i:[inspec,...] ~ {mvar}
+#	LINKSPEC:i:[inspec,...] ~ METEXPANSION 
 #	LINKSPEC:i:[inspec,...] ~ {mvar}*{mvar}
 #	LINKSPEC:input:[inspec,...] ~ ({mvar},{mvar})*({mvar})
 #
@@ -47,9 +47,13 @@ prefix=//{base}/{subject}/pipe
 #			1:
 #			323.1.3213.5.3:
 #
-#		where mvar are variables from variable declaration above that will be
-#		iterated through. Provinences can be combined using either '*' or ','
-#		to determine how mvar variables will be iterated through.
+#		METEXPANSION is a metadata-expansion strategy, consisting of a 
+#			combination of metadata variables that should be varied to 
+#			vary the file list used. 
+#			
+#			mvar are variables from variable declaration above that will be
+#			iterated through. Provinences can be combined using either '*' or ','
+#			to determine how mvar variables will be iterated through.
 #
 #		* will use
 #			every possible combination of the two, ie: {subj}*{fmri} would generate
