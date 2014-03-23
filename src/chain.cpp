@@ -24,6 +24,18 @@ using std::list;
 using std::pair;
 using std::vector;
 
+
+// 1 = expansion *
+// 2 = everything inside except * 
+// 3 = Dependency ID Number ie 1.2
+// 4 = Argument Number ie 3-5,3
+// 5 = Control ie | hello, this is a test
+const std::regex CurlyRe("\\{(\\*)?\\s*((?:([0-9.]*)\\s*:)?"
+		"(?:\\s*([-,_[:alnum:]]*)\\s*)?(?:\\s*"
+		"\\|([,_\\s[:alnum:]]*))?)\\s*\\}");
+const std::sregex_iterator ReEnd;
+
+
 /**********************************************************
  * Helper Functions
  ***********************************************************/
@@ -549,6 +561,15 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 }
 
 
+/**
+ * @brief This function resolves all the inputs and output file names.
+ *
+ * Helper Functions Follow
+ *
+ * @param callstack
+ *
+ * @return 
+ */
 int Chain::Link::resolveTree(list<string>& callstack)
 {
 #ifndef NDEBUG
@@ -600,6 +621,374 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	m_resolved = true;
 	return 0;
 }
+
+/**
+ * @brief Before: m_inputs, m_preinputs, m_metadata could be subject to 
+ * change by parent links, after m_metadata is in its final form.
+ *
+ * @param call stack 
+ *
+ * @return error code
+ */
+int Chain::Link::resolveExternalMetadata(list<string>& callstack)
+{
+	cerr << "resolveExternalMetadata " << this << endl;
+	
+	if(m_resolved)
+		return 0;
+	
+	const std::sregex_iterator regEnd;
+
+	// resolve inputs
+	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
+		cerr << "Input spec: " << *fit << endl;
+		// we have a token filename, now expand  {* } variables
+		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
+		for(; expIt != regEnd ; ++expIt) {
+			
+			cerr << "Prefix " << expIt->prefix().str() << endl;
+			cerr << "Match " << (*expIt)[0].str() << endl;
+			cerr << "Expand?" << (*expIt)[1].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
+			cerr << "Control: " << (*expIt)[4].str() << endl;
+			cerr << "Suffix " << expIt->suffix().str() << endl;
+
+			// ignore global variables for now 
+			auto gvalit = m_parent->m_vars.find((*expIt)[3]);
+			if(gvalit != m_parent->m_vars.end()) {
+				cerr << "Global Var!" << endl;
+				continue;
+			}
+			
+			if(!expIt->prefix().empty() || !expIt->suffix().empty()) {
+				cerr << "Parsing error. References to output of other "
+					"jobs cannot include literals. ie. /ifs/{1.2:3} is"
+					"not valid. Add /ifs to the parent job instead!" << endl;
+				return -1;
+			}
+
+
+			cerr << (*expIt)[3] << endl;
+			printC(getId((*expIt)[3]));
+			cerr << endl;
+			auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
+			if(linkit != m_parent->m_links.end()) {
+				cerr << "External Reference Var!" << endl;
+			}
+	
+			// make sure the inputs' metadta and outputs are up to date
+			linkit->resolveTree(callstack);
+
+			// TODO merge metadata
+			//merge metadata
+			string control = (*expIt)[4].str();
+			bool expand = (*expIt)[1].str() == "*";
+			if(mergeMetadata(m_metadata, linkit->m_metadata, expand, control) < 0) {
+				cerr << "Error resolving inputs/metadata" << endl;
+				return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * @brief This function takes two sets of metadata and merges them into
+ * 	target, which is the output. If expand is specified output metadata
+ * 	will be 1xN, if control is specified, the expansion is limited to 
+ * 	variables not specififed in control. IE
+ *
+ * 	expand 
+ * 	subject run time
+ *
+ * 	without control, all subjects, times and runs will be placed onthe 
+ * 	command line together.
+ *
+ * 	with control = subject. The number of rows will be the number of 
+ * 	of rows 
+ *
+ * @param target
+ * @param source
+ * @param expand
+ * @param control
+ *
+ * @return 
+ */
+int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& target,
+		std::vector<std::vector<std::string>> source, 
+		bool expand, std::string control)
+{
+	list<string> contlist;
+	list<list<string>> sourcetmp;
+	
+	return 0;
+}
+
+/**
+ * @brief This function parses expands or replaces any resolvable  {GLOBAL} 
+ * variables that do not have valid metadata in the current job
+ *
+ * @param 
+ *
+ * @return error code
+ */
+int
+Chain::Link::resolveGlobals()
+{
+	const std::sregex_iterator regEnd;
+	std::smatch args;
+
+#ifndef NDEBUG
+		cerr << "resolveGlobals" << endl;
+		printC(m_preinputs);
+#endif //NDEBUG
+	
+	if(m_resolved)
+		return 0;
+
+	assert(m_metadata.size() > 0);
+	assert(m_labels.size() == m_resolved.size());
+	list<std::string> inExp;
+	bool restart = false;
+
+	while(!restart) {
+		// for input term
+		for(auto fit = m_preinputs.begin(); !restart && 
+						fit != m_preinputs.end(); fit++) {
+
+			// for each variable like "{subject}" in {subject}/{run}
+			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
+			for(; expIt != regEnd ; ++expIt) {
+
+				// ignore global variables that we have metadata for, unless
+				// it calls for expansion ( we will fill just directly use 
+				// this later )
+				auto mit = m_revlabels.find((*expIt)[2]);
+				if(mit != m_revlabels.end() && (*expIt)[1] != "*") {
+					continue;
+				}
+
+				// ignore non-global variables (ie references)
+				auto git = m_parent->m_vars.find((*expIt)[2]);
+				if(git == m_parent->m_vars.end()) {
+					continue;
+				}
+
+				string prefix = fit->substr(0,expIt->position());
+				string suffix = expIt->suffix();
+
+				// perform expansion of global variables using metadata
+				if((*expIt)[1] == "*") {
+#ifndef NDEBUG
+					cerr << "Expanding: " << (*expIt)[0].str() << " in " 
+						<< *fit << endl;
+#endif //NDEBUG
+					for(auto lit = git->second.begin(); 
+								lit != git->second.begin(); lit++) {
+						string expanded = prefix + *lit + suffix;
+#ifndef NDEBUG
+						cerr << "\t" << expanded << endl; 
+#endif //NDEBUG
+						inExp.push_back(expanded);
+					}
+
+					restart = true;
+					fit = m_inputs.erase(fit);
+					splice(fit, inExp);
+				} else {
+				// just replace
+					if(git->second.size() > 1) {
+						// VAR={prefix}/{hello}
+						// {prefix} = a,b,c
+						// VAR=a/{hello},b/{hello},c/{hello}
+						// error, not sure how to handle this
+						cerr << "Error, array passed through " << (*expIt)[0]
+							<< " but no expansion strategy given to the "
+							"process, try adding " << (*expIt)[2] << " to the "
+							"METEXPANSION term of the most recently attacked "
+							"input line" << endl;
+						return -1;
+					}
+					string newval = prefix + git->second.front() + suffix;
+#ifndef NDEBUG
+					cerr << "Resolving: " << (*expIt)[0].str() << " in " 
+						<< *fit << " to " << newval << endl;
+#endif //NDEBUG
+					*fit = newval;
+					restart = true; // need to resolve any terms inside 
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+/**
+ * @brief This function iterates through the inspec list and 
+ * updates the m_inputs array.
+ *
+ * @param callstack
+ *
+ * @return 
+ */
+int Chain::Link::resolveInputs(list<string>& callstack)
+{
+
+	const std::sregex_iterator regEnd;
+
+	std::smatch match;
+
+#ifndef NDEBUG
+	cerr << "resolveInputs" << this << endl;
+	printC(m_preinputs);
+#endif //NDEBUG
+	
+	if(m_resolved)
+		return 0;
+	
+	assert(m_metadata.size() > 0);
+	assert(m_labels.size() == m_resolved.size());
+
+	int ret;
+	InputT tmp;
+	m_inputs.resize(m_metadata.size());
+	
+	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
+#ifndef NDEBUG
+		cerr << "Input spec: " << *fit << endl;
+#endif //NDEBUG
+
+		if(regex_match(*fit, match, CurlyRe)) {
+
+#ifndef NDEBUG
+			cerr << "\tPrefix " << match.prefix().str() << endl;
+			cerr << "\tMatch " << match[0].str() << endl;
+			cerr << "\tVarname: " << match[1].str() << endl;
+			cerr << "\tExpand?" << match[2].str() << endl;
+			cerr << "\tDep Number: " << match[3].str() << endl;
+			cerr << "\tVar/Number: " << match[4].str() << endl;
+			cerr << "\tControl: " << match[5].str() << endl;
+			cerr << "\tSuffix " << match.suffix().str() << endl;
+#endif //NDEBUG
+
+			// single argument
+			string varname = match[2].str(); 
+			auto lvalit = m_revlabels.find(varname);
+			if(lvalit != m_revlabels.end()) {
+				assert(match[1].str() != "*");
+
+				// push inputs onto each job
+				for(unsigned int jj = 0; jj < m_metadata.size(); jj++)
+					m_inputs[jj].push_back(InputT(m_metadata[jj][lvalit->second]));
+			} else {
+				// persumably this should be a reference 
+				ret = resolveInputReference(match[1], match[3], match[4], match[5]);
+			}
+		}
+
+
+		// for each variable like "{subject}" in {subject}/{run}
+		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
+		for(; expIt != regEnd ; ++expIt) {
+
+		}
+
+			
+
+			if((*expIt)[2] == "*") {
+				// need to expand
+				auto gvalit = m_parent->m_vars.find(varname);
+				if(gvalit == m_parent->m_vars.end()) {
+					cerr << "Error, " << *fit << " specifies expansion of the "
+						"variable " << (*expIt)[1] << " but that variable has "
+						"not (yet) been defined. Did you place you variable "
+						"declaration in the beginning of the file? " << endl;
+						return -1;
+				}
+
+				for(unsigned int jj = 0; jj < m_metadata.size(); jj++) {
+					m_inputs[ii].resize(gvalit->second.size());
+					for(unsigned int kk = 0 ; kk < gvalit->second.size(); kk++) {
+						tmp.source = NULL;
+						tmp.filename = expIt->prefix() + gvalit->second[kk] + 
+									expIt->suffix();
+						m_inputs[jj][kk] = ;
+						// warning TODO, may still have a variable to resolve
+					}
+				}
+
+			}
+
+			continue;
+		}
+
+		// just one variable
+		std::sregex_iterator expIt(*fit.cbegin(), *fit.cend(), CurlyRe);
+		for(; expIt != regEnd ; ++expIt) {
+			cerr << "Prefix " << expIt->prefix().str() << endl;
+			cerr << "Match " << (*expIt)[0].str() << endl;
+			cerr << "Varname: " << (*expIt)[1].str() << endl;
+			cerr << "Expand?" << (*expIt)[2].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
+			cerr << "Control: " << (*expIt)[5].str() << endl;
+			cerr << "Suffix " << expIt->suffix().str() << endl;
+
+			// if its just a variable name, should match everything but {* }
+
+			auto gvalit = m_parent->m_vars.find(varname);
+			auto lvalit = m_revlabels.find(varname);
+			
+			// todo iterate until this is false
+			if(gvalit != m_parent->m_vars.end() && lvalit == m_revlabels.end()) {
+				if(gvalit->second.size() > 1) {
+					cerr << "Error! Variable lookup resolved to an array, but without"
+						" process has not been provided with an expansion method"
+						" for that variable! (" << m_sid << ")" << endl;
+					return -1;
+				}
+
+				// successfully resolved, recurse on the new inspec,
+				// possible values like like:
+				// {subject}/{run}/
+				cerr << varname << " -> " << gvalit->second.front() << endl;
+				cerr << inspec << " -> " << 
+					return resolveArgument(gvalit->second.front());
+
+				gvalit = m_parent->m_vars.find(varname);
+				lvalit = m_revlabels.find(varname);
+			}
+
+			if(lvalit != m_revlabels.end()) {
+				// resolveable input, just replace 
+				
+			} else {
+
+			}
+			// now that all the variables are locally defined or external
+			// references...
+
+			for(unsigned int 
+			// if it is an external reference, should match all these
+			bool expand = (*expIt)[2].str() == "*";
+			vector<int> linkid = getId((*expIt)[3].str());
+			int argnum = atoi((*expIt)[4].str());
+			list<int> control;
+			csvToList((*expIt)[5].str(), control);
+
+			auto linkit = m_parent->m_links.find(linkid);
+			
+			oss << expIt->prefix().str() << (*expIt)[0];
+		}
+		if(resolveArgument(*fit) < 0) 
+			return -1;
+	}
+
+	return 0;
+}
+
 
 
 /**
@@ -749,7 +1138,8 @@ int Chain::Link::resolveInputReference(string expand, string dep, string argn,
 			tmp.procnum = jobs.front();
 			if(args.empty()) {
 				// since args is empty, default to all the outputs
-				for(size_t aa = 0 ; aa < linkit->second->m_outputs[jj].size(); aa++) {
+				for(size_t aa = 0 ; aa < linkit->second->m_outputs[jj].size(); 
+								aa++) {
 					tmp.outnum = aa;
 					m_inputs[jj].push_back(tmp);
 				}
@@ -764,421 +1154,6 @@ int Chain::Link::resolveInputReference(string expand, string dep, string argn,
 	}
 }
 
-//int Chain::Link::resolveArgument(list<string>::iterator& argIt) 
-//{
-//	cerr << "Resolving Argument: " << *inspec << endl;
-//
-//	// suppose case 0
-//		std::sregex_iterator expIt(updated.cbegin(), updated.cend(), expRe);
-//		for(; expIt != regEnd ; ++expIt) {
-//			cerr << "Prefix " << expIt->prefix().str() << endl;
-//			cerr << "Match " << (*expIt)[0].str() << endl;
-//			cerr << "Varname: " << (*expIt)[1].str() << endl;
-//			cerr << "Expand?" << (*expIt)[2].str() << endl;
-//			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
-//			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
-//			cerr << "Control: " << (*expIt)[5].str() << endl;
-//			cerr << "Suffix " << expIt->suffix().str() << endl;
-//
-//			// if its just a variable name, should match everything but {* }
-//			string varname = (*expIt)[1].str(); 
-//
-//			auto gvalit = m_parent->m_vars.find(varname);
-//			auto lvalit = m_revlabels.find(varname);
-//
-//			if(gvalit != m_parent->m_vars.end() && lvalit == m_revlabels.end()) {
-//				if(gvalit->second.size() > 1) {
-//					cerr << "Error! Variable lookup resolved to an array, but without"
-//						" process has not been provided with an expansion method"
-//						" for that variable! (" << m_sid << ")" << endl;
-//					return -1;
-//				}
-//
-//				// successfully resolved, recurse on the new inspec,
-//				// possible values like like:
-//				// {subject}/{run}/
-//				cerr << varname << " -> " << gvalit->second.front() << endl;
-//				cerr << inspec << " -> " << 
-//					return resolveArgument(gvalit->second.front());
-//
-//				gvalit = m_parent->m_vars.find(varname);
-//				lvalit = m_revlabels.find(varname);
-//			}
-//
-//			// if it is an external reference, should match all these
-//			bool expand = (*expIt)[2].str() == "*";
-//			vector<int> linkid = getId((*expIt)[3].str());
-//			int argnum = atoi((*expIt)[4].str());
-//			list<int> control;
-//			csvToList((*expIt)[5].str(), control);
-//
-//			auto linkit = m_parent->m_links.find(linkid);
-//			
-//			oss << expIt->prefix().str() << (*expIt)[0];
-//		}
-//	
-//
-//
-//	ostringstream prefix;
-//	string updated;
-//	while(updated != inspec) {
-//		updated = inspec;
-//		prefix.str("");
-//		std::sregex_iterator expIt(updated.cbegin(), updated.cend(), expRe);
-//		for(; expIt != regEnd ; ++expIt) {
-//			cerr << "Prefix " << expIt->prefix().str() << endl;
-//			cerr << "Match " << (*expIt)[0].str() << endl;
-//			cerr << "Varname: " << (*expIt)[1].str() << endl;
-//			cerr << "Expand?" << (*expIt)[2].str() << endl;
-//			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
-//			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
-//			cerr << "Control: " << (*expIt)[5].str() << endl;
-//			cerr << "Suffix " << expIt->suffix().str() << endl;
-//
-//			// if its just a variable name, should match everything but {* }
-//			string varname = (*expIt)[1].str(); 
-//
-//			auto gvalit = m_parent->m_vars.find(varname);
-//			auto lvalit = m_revlabels.find(varname);
-//
-//			if(gvalit != m_parent->m_vars.end() && lvalit == m_revlabels.end()) {
-//				if(gvalit->second.size() > 1) {
-//					cerr << "Error! Variable lookup resolved to an array, but without"
-//						" process has not been provided with an expansion method"
-//						" for that variable! (" << m_sid << ")" << endl;
-//					return -1;
-//				}
-//
-//				// successfully resolved, recurse on the new inspec,
-//				// possible values like like:
-//				// {subject}/{run}/
-//				cerr << varname << " -> " << gvalit->second.front() << endl;
-//				cerr << inspec << " -> " << 
-//					return resolveArgument(gvalit->second.front());
-//
-//				gvalit = m_parent->m_vars.find(varname);
-//				lvalit = m_revlabels.find(varname);
-//			}
-//
-//			// if it is an external reference, should match all these
-//			bool expand = (*expIt)[2].str() == "*";
-//			vector<int> linkid = getId((*expIt)[3].str());
-//			int argnum = atoi((*expIt)[4].str());
-//			list<int> control;
-//			csvToList((*expIt)[5].str(), control);
-//
-//			auto linkit = m_parent->m_links.find(linkid);
-//			
-//			oss << expIt->prefix().str() << (*expIt)[0];
-//		}
-//	}
-//	// if its a global variable that we don't have metadata associated
-//	// with, try to resolve it
-//
-//
-//	lvalit = m_revlabels.find(varname);
-//	linkit = m_parent->m_links.find(getId(varname));
-//	if(gvalit != m_parent->m_vars.end()) {
-//		cerr << "Global Var!" << endl;
-//		// if we have a value from our metadata for the variable
-//		// then fill the value in for the current job
-//
-//		// otherwise just try to replace
-//	} else if(lvalit != m_revlabels.end()) {
-//		cerr << "LocalVar!" << endl;
-//		// if we have a value from our metadata for the variable
-//		// then fill the value in for the current job
-//
-//		// otherwise just try to replace
-//	} else if(linkit != m_parent->m_links.end()) {
-//		cerr << "External Reference Var!" << endl;
-//
-//		// make sure the inputs' metadta and outputs are up to date
-//		linkit->resolveTree(callstack);
-//
-//		InputT tmp;
-//		tmp.source = &(*linkit);
-//
-//		// if {*...}
-//		// expand out 
-//		for(unsigned int op = 0; op < linkit->m_metadata; op++) {
-//			if(linkit->m_metadata[op] == );
-//			// if |{subject} == current subject and if {run} = current run
-//			// push InputT onto list of arguments
-//		}
-//
-//		m_inputs[jj].push_back(InputT());
-//
-//	}
-//}
-
-/**
- * @brief This function iterates through the inspec list and 
- * updates the m_inputs array.
- *
- * @param callstack
- *
- * @return 
- */
-int Chain::Link::resolveInputs(list<string>& callstack)
-{
-
-	const std::sregex_iterator regEnd;
-	const std::regex expRe("\\s*\\{(\\*)?\\s*((?:([0-9.]*)\\s*:)?"
-			"(?:\\s*([-,_[:alnum:]]*)\\s*)?(?:\\s*"
-			"\\|([,_[:alnum:]]*))?)\\s*\\}\\s*");
-
-	std::smatch match;
-
-#ifndef NDEBUG
-	cerr << "resolveInputs" << this << endl;
-	printC(m_preinputs);
-#endif //NDEBUG
-	
-	if(m_resolved)
-		return 0;
-	
-	assert(m_metadata.size() > 0);
-	assert(m_labels.size() == m_resolved.size());
-
-	int ret;
-	InputT tmp;
-	m_inputs.resize(m_metadata.size());
-	
-	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-#ifndef NDEBUG
-		cerr << "Input spec: " << *fit << endl;
-#endif //NDEBUG
-
-		if(regex_match(*fit, match, expRe)) {
-
-#ifndef NDEBUG
-			cerr << "\tPrefix " << match.prefix().str() << endl;
-			cerr << "\tMatch " << match[0].str() << endl;
-			cerr << "\tVarname: " << match[1].str() << endl;
-			cerr << "\tExpand?" << match[2].str() << endl;
-			cerr << "\tDep Number: " << match[3].str() << endl;
-			cerr << "\tVar/Number: " << match[4].str() << endl;
-			cerr << "\tControl: " << match[5].str() << endl;
-			cerr << "\tSuffix " << match.suffix().str() << endl;
-#endif //NDEBUG
-
-			// single argument
-			string varname = match[2].str(); 
-			auto lvalit = m_revlabels.find(varname);
-			if(lvalit != m_revlabels.end()) {
-				assert(match[1].str() != "*");
-
-				// push inputs onto each job
-				for(unsigned int jj = 0; jj < m_metadata.size(); jj++)
-					m_inputs[jj].push_back(InputT(m_metadata[jj][lvalit->second]));
-			} else {
-				// persumably this should be a reference 
-				ret = resolveInputReference(match[1], match[3], match[4], match[5]);
-			}
-		}
-
-
-		// for each variable like "{subject}" in {subject}/{run}
-		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
-		for(; expIt != regEnd ; ++expIt) {
-
-		}
-
-			
-
-			if((*expIt)[2] == "*") {
-				// need to expand
-				auto gvalit = m_parent->m_vars.find(varname);
-				if(gvalit == m_parent->m_vars.end()) {
-					cerr << "Error, " << *fit << " specifies expansion of the "
-						"variable " << (*expIt)[1] << " but that variable has "
-						"not (yet) been defined. Did you place you variable "
-						"declaration in the beginning of the file? " << endl;
-						return -1;
-				}
-
-				for(unsigned int jj = 0; jj < m_metadata.size(); jj++) {
-					m_inputs[ii].resize(gvalit->second.size());
-					for(unsigned int kk = 0 ; kk < gvalit->second.size(); kk++) {
-						tmp.source = NULL;
-						tmp.filename = expIt->prefix() + gvalit->second[kk] + 
-									expIt->suffix();
-						m_inputs[jj][kk] = ;
-						// warning TODO, may still have a variable to resolve
-					}
-				}
-
-			}
-
-			continue;
-		}
-
-		// just one variable
-		std::sregex_iterator expIt(*fit.cbegin(), *fit.cend(), expRe);
-		for(; expIt != regEnd ; ++expIt) {
-			cerr << "Prefix " << expIt->prefix().str() << endl;
-			cerr << "Match " << (*expIt)[0].str() << endl;
-			cerr << "Varname: " << (*expIt)[1].str() << endl;
-			cerr << "Expand?" << (*expIt)[2].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
-			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
-			cerr << "Control: " << (*expIt)[5].str() << endl;
-			cerr << "Suffix " << expIt->suffix().str() << endl;
-
-			// if its just a variable name, should match everything but {* }
-
-			auto gvalit = m_parent->m_vars.find(varname);
-			auto lvalit = m_revlabels.find(varname);
-			
-			// todo iterate until this is false
-			if(gvalit != m_parent->m_vars.end() && lvalit == m_revlabels.end()) {
-				if(gvalit->second.size() > 1) {
-					cerr << "Error! Variable lookup resolved to an array, but without"
-						" process has not been provided with an expansion method"
-						" for that variable! (" << m_sid << ")" << endl;
-					return -1;
-				}
-
-				// successfully resolved, recurse on the new inspec,
-				// possible values like like:
-				// {subject}/{run}/
-				cerr << varname << " -> " << gvalit->second.front() << endl;
-				cerr << inspec << " -> " << 
-					return resolveArgument(gvalit->second.front());
-
-				gvalit = m_parent->m_vars.find(varname);
-				lvalit = m_revlabels.find(varname);
-			}
-
-			if(lvalit != m_revlabels.end()) {
-				// resolveable input, just replace 
-				
-			} else {
-
-			}
-			// now that all the variables are locally defined or external
-			// references...
-
-			for(unsigned int 
-			// if it is an external reference, should match all these
-			bool expand = (*expIt)[2].str() == "*";
-			vector<int> linkid = getId((*expIt)[3].str());
-			int argnum = atoi((*expIt)[4].str());
-			list<int> control;
-			csvToList((*expIt)[5].str(), control);
-
-			auto linkit = m_parent->m_links.find(linkid);
-			
-			oss << expIt->prefix().str() << (*expIt)[0];
-		}
-		if(resolveArgument(*fit) < 0) 
-			return -1;
-	}
-
-	return 0;
-}
-
-/**
- * @brief This function parses expands or replaces any resolvable  {GLOBAL} 
- * variables that do not have valid metadata in the current job
- *
- * @param 
- *
- * @return error code
- */
-int
-Chain::Link::resolveGlobals()
-{
-	const std::sregex_iterator regEnd;
-	std::regex expRe("\\{(\\*)?\\s*([-,_[:alnum:]]*)\\s*\\}"); //expansion Rgex
-	std::smatch args;
-
-#ifndef NDEBUG
-		cerr << "resolveGlobals" << endl;
-		printC(m_preinputs);
-#endif //NDEBUG
-	
-	if(m_resolved)
-		return 0;
-
-	assert(m_metadata.size() > 0);
-	assert(m_labels.size() == m_resolved.size());
-	list<std::string> inExp;
-	bool restart = false;
-
-	while(!restart) {
-		// for input term
-		for(auto fit = m_preinputs.begin(); !restart && 
-						fit != m_preinputs.end(); fit++) {
-
-			// for each variable like "{subject}" in {subject}/{run}
-			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
-			for(; expIt != regEnd ; ++expIt) {
-
-				// ignore global variables that we have metadata for, unless
-				// it calls for expansion ( we will fill just directly use 
-				// this later )
-				auto mit = m_revlabels.find((*expIt)[2]);
-				if(mit != m_revlabels.end() && (*expIt)[1] != "*") {
-					continue;
-				}
-
-				// ignore non-global variables (ie references)
-				auto git = m_parent->m_vars.find((*expIt)[2]);
-				if(git == m_parent->m_vars.end()) {
-					continue;
-				}
-
-				string prefix = fit->substr(0,expIt->position());
-				string suffix = expIt->suffix();
-
-				// perform expansion of global variables using metadata
-				if((*expIt)[1] == "*") {
-#ifndef NDEBUG
-					cerr << "Expanding: " << (*expIt)[0].str() << " in " 
-						<< *fit << endl;
-#endif //NDEBUG
-					for(auto lit = git->second.begin(); 
-								lit != git->second.begin(); lit++) {
-						string expanded = prefix + *lit + suffix;
-#ifndef NDEBUG
-						cerr << "\t" << expanded << endl; 
-#endif //NDEBUG
-						inExp.push_back(expanded);
-					}
-
-					restart = true;
-					fit = m_inputs.erase(fit);
-					splice(fit, inExp);
-				} else {
-				// just replace
-					if(git->second.size() > 1) {
-						// VAR={prefix}/{hello}
-						// {prefix} = a,b,c
-						// VAR=a/{hello},b/{hello},c/{hello}
-						// error, not sure how to handle this
-						cerr << "Error, array passed through " << (*expIt)[0]
-							<< " but no expansion strategy given to the "
-							"process, try adding " << (*expIt)[2] << " to the "
-							"METEXPANSION term of the most recently attacked "
-							"input line" << endl;
-						return -1;
-					}
-					string newval = prefix + git->second.front() + suffix;
-#ifndef NDEBUG
-					cerr << "Resolving: " << (*expIt)[0].str() << " in " 
-						<< *fit << " to " << newval << endl;
-#endif //NDEBUG
-					*fit = newval;
-					restart = true; // need to resolve any terms inside 
-				}
-			}
-		}
-	}
-	return 0;
-}
-
 int
 Chain::Link::run()
 {
@@ -1187,114 +1162,6 @@ Chain::Link::run()
 }
 
 
-/**
- * @brief This function takes two sets of metadata and merges them into
- * 	target, which is the output. If expand is specified output metadata
- * 	will be 1xN, if control is specified, the expansion is limited to 
- * 	variables not specififed in control. IE
- *
- * 	expand 
- * 	subject run time
- *
- * 	without control, all subjects, times and runs will be placed onthe 
- * 	command line together.
- *
- * 	with control = subject. The number of rows will be the number of 
- * 	of rows 
- *
- * @param target
- * @param source
- * @param expand
- * @param control
- *
- * @return 
- */
-int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& target,
-		std::vector<std::vector<std::string>> source, 
-		bool expand, std::string control)
-{
-	list<string> contlist;
-	list<list<string>> sourcetmp;
-	
-	return 0;
-}
-
-/**
- * @brief Before: m_inputs, m_preinputs, m_metadata could be subject to 
- * change by parent links, after m_metadata and m_inputs are 
- * in their final form.
- *
- * @param call stack 
- *
- * @return error code
- */
-int Chain::Link::resolveExternalMetadata(list<string>& callstack)
-{
-	cerr << "resolveExternalMetadata " << this << endl;
-	
-	if(m_resolved)
-		return 0;
-	
-	const std::sregex_iterator regEnd;
-	const std::regex expRe("\\{(\\*)?"
-			"(?:\\s*([0-9.]*)\\s*:)?"
-			"(?:\\s*([-,_[:alnum:]]*)\\s*)?"
-			"(?:\\s*\\|([^}]*))?\\}");
-
-	// resolve inputs
-	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-		cerr << "Input spec: " << *fit << endl;
-		// we have a token filename, now expand  {* } variables
-		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), expRe);
-		for(; expIt != regEnd ; ++expIt) {
-			
-			cerr << "Prefix " << expIt->prefix().str() << endl;
-			cerr << "Match " << (*expIt)[0].str() << endl;
-			cerr << "Expand?" << (*expIt)[1].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
-			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
-			cerr << "Control: " << (*expIt)[4].str() << endl;
-			cerr << "Suffix " << expIt->suffix().str() << endl;
-
-			// ignore global variables for now 
-			auto gvalit = m_parent->m_vars.find((*expIt)[3]);
-			if(gvalit != m_parent->m_vars.end()) {
-				cerr << "Global Var!" << endl;
-				continue;
-			}
-			
-			if(!expIt->prefix().empty() || !expIt->suffix().empty()) {
-				cerr << "Parsing error. References to output of other "
-					"jobs cannot include literals. ie. /ifs/{1.2:3} is"
-					"not valid. Add /ifs to the parent job instead!" << endl;
-				return -1;
-			}
-
-
-			cerr << (*expIt)[3] << endl;
-			printC(getId((*expIt)[3]));
-			cerr << endl;
-			auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
-			if(linkit != m_parent->m_links.end()) {
-				cerr << "External Reference Var!" << endl;
-			}
-	
-			// make sure the inputs' metadta and outputs are up to date
-			linkit->resolveTree(callstack);
-
-			// TODO merge metadata
-			//merge metadata
-			string control = (*expIt)[4].str();
-			bool expand = (*expIt)[1].str() == "*";
-			if(mergeMetadata(m_metadata, linkit->m_metadata, expand, control) < 0) {
-				cerr << "Error resolving inputs/metadata" << endl;
-				return -1;
-			}
-		}
-	}
-
-	return 0;
-}
 
 /**********************************************************
  * Chain
