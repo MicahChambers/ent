@@ -48,39 +48,21 @@ vector<shared_ptr<MetaData>> MetaData::split(const list<string>& control)
 		gmax++;
 	}
 
-#ifndef VERYDEBUG 
-	cerr << "Group from controls: " << endl;
-	for(auto vv:control) cerr << vv << "," << endl;
-	for(size_t ii=0; ii<groups.size(); ii++) {
-		cerr << ii << ":" << groups[ii] << endl;
-	}
-#endif 
-	
+	// take intial values, and remap the first one in each group
+	// as group 1, the second as group 2 etc, so that equavalent
+	// values from control groups are mapped across outputs (
+	// and thus will be used in the same job, rather than differnet)
 	map<int,int> remap;
-	for(size_t ii=0,jj=0; ii<groups.size(); ii++) {
-		auto it = remap.insert(make_pair(groups[ii],jj));
-		if(it.second) 
-			jj++;
-	}
-
 	for(size_t ii=0; ii<groups.size(); ii++) {
-		groups[ii] = remap[groups[ii]];
+		auto itbool = remap.insert(make_pair(groups[ii],0));
+		groups[ii]=itbool.first->second++;
 	}
-
-#ifndef VERYDEBUG 
-	cerr << "Group from controls: " << endl;
-	for(auto vv:control) cerr << vv << "," << endl;
-	for(size_t ii=0; ii<groups.size(); ii++) {
-		cerr << ii << ":" << groups[ii] << endl;
-	}
-#endif //NDEBUG
 	
 	// save the size of each group into remap
 	remap.clear();
 	for(size_t ii=0; ii<groups.size(); ii++) {
-		auto retstat = remap.insert(make_pair(groups[ii],-1));
+		auto retstat = remap.insert(make_pair(groups[ii],0));
 		retstat.first->second++;
-		cerr << ii << ", " << groups[ii] << retstat.first->second << endl;
 	}
 
 #ifndef NDEBUG
@@ -95,7 +77,6 @@ vector<shared_ptr<MetaData>> MetaData::split(const list<string>& control)
 	vector<std::shared_ptr<MetaData>> out(remap.size());
 	for(size_t ii=0; ii<out.size(); ii++) {
 		out[ii].reset(new MetaData(m_cols, remap[ii]));
-		
 
 		// update m_labels and m_lookup
 		for(size_t cc=0; cc<m_cols; cc++) {
@@ -104,18 +85,17 @@ vector<shared_ptr<MetaData>> MetaData::split(const list<string>& control)
 		}
 	}
 
-	// set all the remap counts to 0 again (to count)
-	for(auto vv:remap) 
-		vv.second=0;
-
 	// for each row
+	remap.clear();//keep the row count for each output
 	for(int rr=0; rr<m_rows; rr++) {
 		// increment count for group
-		size_t outrow = remap[groups[rr]]++;
+		auto itbool = remap.insert(make_pair(groups[rr],0));
+		size_t outrow = itbool.first->second++;
 
 		// copy current row into output
 		for(size_t cc=0; cc<m_cols; cc++) {
-			out[groups[rr]]->m_data[outrow*m_cols+cc] = geti(rr,cc);
+			auto& tmp = *out[groups[rr]];
+			tmp.m_data[outrow*m_cols+cc] = geti(rr,cc);
 		}
 
 	}
