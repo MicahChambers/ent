@@ -299,7 +299,6 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 			stack.push_back(list<MetaData>());
 		} else if(spec[ii] == ')') {
 			// we are going up, split up previous level
-
 			// it points to the layer above the current
 			list<list<MetaData>>::iterator lit = stack.end();
 			lit--; lit--;
@@ -446,7 +445,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	m_preinputs.clear();
 	m_preoutputs.clear();
 
-	// split out input files, (but ignore commas inside {}
+	// split out input files, (but ignore commas inside {})
 	cerr << "Initial Input Spec" << endl;
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
@@ -463,7 +462,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	//		cerr << "\t" << *fit << endl;
 	//	}
 
-	// split out output files, (but ignore commas inside {}
+	// split out output files, (but ignore commas inside {})
 	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
 		m_preoutputs.push_back(*fnIt);
@@ -507,7 +506,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		return;
 	}
 
-	// split out output files, (but ignore commas inside {}
+	// split out output files, (but ignore commas inside {})
 	m_preinputs.clear();
 	cerr << "Initial Input Spec" << endl;
 	sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), commaRe, -1);
@@ -534,6 +533,8 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 /**
  * @brief This function resolves all the inputs and output file names.
  *
+ * The basic gist is 
+ *
  * Helper Functions Follow
  *
  * @param callstack
@@ -557,8 +558,11 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	// push ourselves onto the call stack
 	stack.push_back(m_sid);
 
-	// resolve external inputs (set metadata, and update preinputs)
-	int ret = resolveExternalMetadata(callstack);
+	// perform expansion so that we resolve metadata without worrying about it
+	resolveExpandableGlobals();
+
+	// merge in metadata from all dependencies 
+	int ret = mergeExternalMetadata(callstack);
 	if(ret < 0) {
 		cerr << "Error resolving inputs for " << it->second->m_sid << " from "
 			<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
@@ -571,7 +575,7 @@ int Chain::Link::resolveTree(list<string>& callstack)
 
 	// resolve all global varianble references, including 
 	// variables of variables of variables.... 
-	ret = resolveGlobals();
+	ret = resolveNonExpandableGlobals();
 	if(ret < 0) {
 		cerr << "Error resolving global variabes for " << it->second->m_sid 
 			<< " from " << it->second->m_sourcefile << ":" 
@@ -600,9 +604,75 @@ int Chain::Link::resolveTree(list<string>& callstack)
  *
  * @return error code
  */
-int Chain::Link::resolveExternalMetadata(list<string>& callstack)
+int Chain::Link::resolveExpandableGlobals()
 {
-	cerr << "resolveExternalMetadata " << this << endl;
+	cerr << "resolveExpandableGlobals" << this << endl;
+	
+	if(m_resolved)
+		return 0;
+	
+	std::smatch args;
+	list<std::string> inExp;
+	bool restart = false;
+
+	while(!restart) {
+		// for input term
+		for(auto fit = m_preinputs.begin(); !restart && 
+						fit != m_preinputs.end(); fit++) {
+
+			// for each variable like "{subject}" in {subject}/{run}
+			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
+			for(; !restart && expIt != ReEnd ; ++expIt) {
+				
+				// ignore non-expansion variables
+				if((*expIt)[1] != "*") 
+					continue;
+
+				// ignore non-global variables (ie references)
+				auto git = m_parent->m_vars.find((*expIt)[2]);
+				if(git == m_parent->m_vars.end()) {
+					continue;
+				}
+
+				string prefix = fit->substr(0,expIt->position());
+				string suffix = expIt->suffix();
+
+#ifndef NDEBUG
+				cerr << "Expanding: " << (*expIt)[0].str() << " in " 
+					<< *fit << endl;
+#endif //NDEBUG
+				for(auto lit = git->second.begin(); 
+						lit != git->second.begin(); lit++) {
+					string expanded = prefix + *lit + suffix;
+#ifndef NDEBUG
+					cerr << "\t" << expanded << endl; 
+#endif //NDEBUG
+					inExp.push_back(expanded);
+				}
+
+				restart = true;
+				fit = m_inputs.erase(fit);
+				splice(fit, inExp);
+			}
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Merges metadata of all input dependencies, does not affect
+ * m_inputs or m_preinputs, just m_metadata
+ *
+ * @param call stack 
+ *
+ * @return error code
+ */
+int Chain::Link::mergeExternalMetadata(list<string>& callstack)
+{
+#ifndef NDEBUG
+	cerr << "mergeExternalMetadata" << this << endl;
+#endif //NDEBUG
 	
 	if(m_resolved)
 		return 0;
@@ -612,10 +682,10 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 	// resolve inputs
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 		cerr << "Input spec: " << *fit << endl;
-		// we have a token filename, now expand  {* } variables
 		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
 		for(; expIt != ReEnd; ++expIt) {
 			
+#ifndef NDEBUG
 			cerr << "Prefix " << expIt->prefix().str() << endl;
 			cerr << "Match " << (*expIt)[0].str() << endl;
 			cerr << "Expand?" << (*expIt)[1].str() << endl;
@@ -623,6 +693,7 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
 			cerr << "Control: " << (*expIt)[4].str() << endl;
 			cerr << "Suffix " << expIt->suffix().str() << endl;
+#endif //NDEBUG
 
 			// ignore global variables for now 
 			auto gvalit = m_parent->m_vars.find((*expIt)[3]);
@@ -650,10 +721,8 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 			linkit->resolveTree(callstack);
 
 			//merge metadata
-			string control = (*expIt)[4].str();
-			;
-			if(mergeMetadata(m_metadata, linkit->m_metadata, 
-						(*expIt)[1].str() == "*", control) < 0) {
+			
+			if(m_metadata.merge(linkit->m_metadata) < 0) {
 				cerr << "Error resolving inputs/metadata" << endl;
 				return -1;
 			}
@@ -686,7 +755,7 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
  * @return 
  */
 int Chain::Link::mergeMetadata(MetaData& src, 
-		bool expand, std::string control)
+		bool expand, std::string controlstr)
 {
 	if(expand && !control.empty()) {
 		cerr << "Control term without expansion {*} term given in " << "{" 
@@ -699,116 +768,18 @@ int Chain::Link::mergeMetadata(MetaData& src,
 	cerr << "And B: " << src << endl;
 #endif// NDEBUG
 	if(expand) {
-		list<int> 
-
-		int base = 1;
-		for(size_t cc=0; cc<srclabels.size(); cc++) { 
-			// only control for the label if it is in controls
-			if(!regex_search(controlstr, srclabels[cc]))
-				continue;
-			
-			int ngroup = 0;
-
-			map<string,int> groups; // value -> group
-			for(size_t jj = 0 ; jj < srcmd.size(); jj++) {
-				auto tryinsert = groups.insert(make_pair(srcmd[jj][cc], ngroup));
-
-				// if insertion succeeded, we have a new group
-				if(tryinsert.second) groupno++;
-
-				// mapping = oldmap + currgroup*base
-				mapping[jj] += tryinsert.first.second*base;
-			}
-
-			int maxgroup = INT_MIN;
-			for(size_t jj = 0 ; jj < mapping.size(); jj++) 
-				maxgroup = max(maxgroup, mapping[jj]);
-			base = maxgroup+1;
+		list<string> control;
+		if(csvToList(controlstr, control) != 0) {
+			return -1;
 		}
-
-		// now we have groupings for the input metadata, now we need to map
-		// each group in the input metadata to output metadata
-		// for each input group
-		//     find the column for the matching metadata
-//		// map group # -> source job number
-//		for(unsigned int ii = 0 ; ii < jobgroups.size(); ii++)
-//			mapping.insert(jobgroups[ii], ii);
-		
+		//TODO merge first or second? so do we split then merge each of those
+		//into ours, or do we megre then split ours up, either was we probably need
+		//to build the command line immeiately from here
+		vector<shared_ptr<MetaData>> split = src.split(control);
 	} else {
-
-		size_t origsz=tgtlabels.size();
-		for(size_t ii=0; ii<tgtlabels.size(); ii++){
-			for(size_t jj=0; jj<srclabels.size(); jj++){
-				if(tgtlabels[oc] == srclabels[ii]) {
-					found = true;
-					break;
-				}
-			}
-			if(!found) 
-				tgtlabels.push_back(srclabels[ii]);
-		}
-
-		vector<vector<int>> tmpmd;
-		for(size_t jj=0; jj<tgtlabels.size(); jj++) {
-			// for each original metadata line, find all matching
-			// in the src metadata, and append them
-			auto jobs = getJobs();
-			
-		}
-
-		/// TODO what about about paired metadata in the source!
-		// add all the new columns
-		size_t colsz = newcolumns.size()+tgtlabels.size();
-		size_t oldcolsz = newcolumns.size();
-		size_t newsz = tgtmd.size();
-		size_t oldsz = tgtmd.size();
-		for(auto it = newcolumns.begin(); it != newcolumns.end(); it++)
-			newsz *= srclookup[*it].size();
-
-		tgtmd.resize(newsz);
-		tgtlabels.resize(colsz);
-		tgtlookup.resize(colsz);
-
-		size_t jj = 0;
-		for(auto it = newcolumns.begin(); it != newcolumns.end(); it++) {
-			for(size_t kk=0; kk<oldsz; kk++) {
-				tgtmd[jj].resize(colsz));
-
-				tgtmd[jj]
-
-		}
-			if(!found) {
-				// just maintains the the value->order mapping, by finding
-				// the first time each value is mentioning and incrementing
-				// from there
-				map<string,int> valueOrder;
-				size_t kk =0;
-				for(size_t jj=0; jj<srcmd.size(); jj++) {
-					auto ret = values.insert(make_pair(srcmd[jj][ii], kk));
-
-					// new value found
-					if(ret.second) kk++;
-				}
-				oc = tgtlabels.size();
-				tgtlabels.push_back(srclabels[ii]);
-
-				// add column
-				size_t oldsz = tgtmd.size();
-				tgtmd.resize(tgtmd.size()*valueOrder.size());
-				for(auto it=valueOrder.begin(); it!=valueOrder.end(); it++) {
-					for(kk=0; kk<oldsz; kk++)
-						tgtmd[oldsz*it->second+jj].push_back(it->first);
-				}
-			}
-#ifndef NDEBUG
-			cerr << "Source Column " << ii << " = " << oc << " target" << endl;
-#endif// NDEBUG
-		}
+		if(m_metadata.ujoin(src) != 0)
+			return -1;
 	}
-	list<string> contlist;
-	list<list<string>> sourcetmp;
-	
-	
 
 	return 0;
 }
@@ -822,12 +793,12 @@ int Chain::Link::mergeMetadata(MetaData& src,
  * @return error code
  */
 int
-Chain::Link::resolveGlobals()
+Chain::Link::resolveNonExpandableGlobals()
 {
 	std::smatch args;
 
 #ifndef NDEBUG
-		cerr << "resolveGlobals" << endl;
+		cerr << "resolveNonExpandableGlobals" << endl;
 		printC(m_preinputs);
 #endif //NDEBUG
 	
@@ -848,11 +819,19 @@ Chain::Link::resolveGlobals()
 			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
 			for(; expIt != ReEnd ; ++expIt) {
 
-				// ignore global variables that we have metadata for, unless
-				// it calls for expansion ( we will fill just directly use 
-				// this later )
+#ifndef NDEBUG
+			cerr << "Prefix " << expIt->prefix().str() << endl;
+			cerr << "Match " << (*expIt)[0].str() << endl;
+			cerr << "Expand?" << (*expIt)[1].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
+			cerr << "Control: " << (*expIt)[4].str() << endl;
+			cerr << "Suffix " << expIt->suffix().str() << endl;
+#endif //NDEBUG
+
+				// ignore global variables that we have metadata for
 				auto mit = m_revlabels.find((*expIt)[2]);
-				if(mit != m_revlabels.end() && (*expIt)[1] != "*") {
+				if(mit != m_revlabels.end()) {
 					continue;
 				}
 
@@ -862,49 +841,35 @@ Chain::Link::resolveGlobals()
 					continue;
 				}
 
+				if((*expIt)[1] == "*") {
+					cerr << "Expandable globals should have been taken care of"
+						" in resolveExpandableGlobals" << endl;
+					return -1;
+				}
+
 				string prefix = fit->substr(0,expIt->position());
 				string suffix = expIt->suffix();
 
-				// perform expansion of global variables using metadata
-				if((*expIt)[1] == "*") {
-#ifndef NDEBUG
-					cerr << "Expanding: " << (*expIt)[0].str() << " in " 
-						<< *fit << endl;
-#endif //NDEBUG
-					for(auto lit = git->second.begin(); 
-								lit != git->second.begin(); lit++) {
-						string expanded = prefix + *lit + suffix;
-#ifndef NDEBUG
-						cerr << "\t" << expanded << endl; 
-#endif //NDEBUG
-						inExp.push_back(expanded);
-					}
-
-					restart = true;
-					fit = m_inputs.erase(fit);
-					splice(fit, inExp);
-				} else {
-				// just replace
-					if(git->second.size() > 1) {
-						// VAR={prefix}/{hello}
-						// {prefix} = a,b,c
-						// VAR=a/{hello},b/{hello},c/{hello}
-						// error, not sure how to handle this
-						cerr << "Error, array passed through " << (*expIt)[0]
-							<< " but no expansion strategy given to the "
-							"process, try adding " << (*expIt)[2] << " to the "
-							"METEXPANSION term of the most recently attacked "
-							"input line" << endl;
-						return -1;
-					}
-					string newval = prefix + git->second.front() + suffix;
-#ifndef NDEBUG
-					cerr << "Resolving: " << (*expIt)[0].str() << " in " 
-						<< *fit << " to " << newval << endl;
-#endif //NDEBUG
-					*fit = newval;
-					restart = true; // need to resolve any terms inside 
+				// perform replacement replace
+				if(git->second.size() > 1) {
+					// VAR={prefix}/{hello}
+					// {prefix} = a,b,c
+					// VAR=a/{hello},b/{hello},c/{hello}
+					// error, not sure how to handle this
+					cerr << "Error, array passed through " << (*expIt)[0]
+						<< " but no expansion strategy given to the "
+						"process, try adding " << (*expIt)[2] << " to the "
+						"METEXPANSION term of the most recently attacked "
+						"input line" << endl;
+					return -1;
 				}
+				string newval = prefix + git->second.front() + suffix;
+#ifndef NDEBUG
+				cerr << "Resolving: " << (*expIt)[0].str() << " in " 
+					<< *fit << " to " << newval << endl;
+#endif //NDEBUG
+				*fit = newval;
+				restart = true; // need to resolve any terms inside 
 			}
 		}
 	}
@@ -936,11 +901,134 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 	assert(m_labels.size() == m_resolved.size());
 
 	int ret;
+	// collapse is the list of metadata that we are being asked to collapse
+	// by the input args, controls is the reverse
+	list<string> controls;
+	list<string> collapse;
+	for(auto fit=m_preinputs.begin(); fit!=m_preinputs.end(); fit++) {
+		// for each variable like "{subject}" in {subject}/{run}
+		if(!regex_match(*fit, match, CurlyRe)) {
+			continue;
+		}
+		// single argument, since that is the only acceptable form
+		// of refernece
+
+#ifndef NDEBUG
+		cerr << "\tExpand?" << match[2].str() << endl;
+		cerr << "\tDep Number: " << match[3].str() << endl;
+		cerr << "\tControl: " << match[5].str() << endl;
+#endif //NDEBUG
+		// ignore variables that aren't references to other links
+		auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
+		if(linkit == m_parent->m_links.end()) {
+			continue;
+		}
+
+		// no expansion, everything gets added to controls, nothing
+		// gets added to collapse
+		if(match[2].str() != "*") {
+			for(size_t ii=0; ii<linkit->second.m_metadata.m_labels.size(); ii++)
+				controls.push_back(linkit->second.m_metadata.m_labels[ii]);
+			continue;
+		}
+
+		list<string> tmpcontrols;
+		csvToList(match[5].str(), tmpcontrols);
+		
+		// figure out which variables are NOT in tmpcontrols, then 
+		for(size_t ii=0; ii<linkit->second.m_metadata.m_labels.size(); ii++){
+			bool match = false;
+			for(auto it=tmpcontrols.begin(); it!=tmpcontrols.end(); it++) {
+				if(*it == linkit->second.m_metadata.m_labels[ii]) {
+					match=true;
+				}
+			}
+			if(!match) 
+				collapse.push_back(linkit->second.m_metadata.m_labels[ii]);
+		}
+		controls.splice(controls.end(), tmpcontrols);
+
+#ifndef NDEBUG
+		cerr << linkit->second.m_metadata << endl;
+		cerr << "Current Collapse: ";
+		printC(collapse);
+		cerr << "Current Controls: ";
+		printC(collapse);
+		cerr << endl;
+#endif //NDEBUG
+	}
+
+	// anything not mentioned in collapse gets added to controls, 
+	// anything that is in both triggers an error
+	collapse.sort();
+	controls.sort();
+	list<string> finalcontrol;
+	for(size_t ii=0; ii<m_metadata.m_labels.size(); ii++) {
+		bool docollapse=false;
+		bool docontrol=false;
+
+		for(auto it1=collapse.begin(); it1!=collapse.end(); it1++) {
+			if(*it1 == m_metadata.m_labels[ii])
+				docollapse=true;
+		}
+		
+		for(auto it1=control.begin(); it1!=control.end(); it1++) {
+			if(*it1 == m_metadata.m_labels[ii])
+				docontrol=true;
+		}
+
+		if(docontrol && docollapse) {
+			cerr << "Error same metadata variable from two inputs call "
+				"for simultaneous collapsing and controlling of arguments "
+				"this happens when you use somthing like {*1.1:1} and {2.1:2} "
+				"where both 1.1 and 2.1 have metadata in common. Thus 1.1 "
+				"would have all the subjects put on the command line together "
+				"but 2.1 would have them as different processes. There doesn't"
+				" seem to be a reasonable way to resolve this, althoug if you "
+				"have suggestions you could let me know. But then why would you "
+				"want all the T1 images from different subjects on the command "
+				"line matched up with a different T1 image?" << endl;
+			return -1;
+		} else if(docontrol || !docollapse) {
+			finalcontrol.push_back(m_metadata.m_labels[ii]);
+		}
+	}
+	
+#ifndef NDEBUG
+		cerr << linkit->second.m_metadata << endl;
+		cerr << "Final Controls: ";
+		printC(finalcontrol);
+		cerr << endl;
+#endif //NDEBUG
+
+
+//	if(finalcontrol.empty()) {
+//		list<string> dummy;
+//		dummy.push_back("dummy");
+//		MetaData dummy("dummy", dummy);
+//		m_metadata.nest(dummy);
+//		finalcontrol.push_back("dummy");
+//	}
+
+	//TODO
+	// m_metadata -> now has finalcontrol.size() columns
+	//  	if NOTHING was given in finalcontrol, the single column
+	//  	is a dummy
+	// expmetadata -> each has all the original columns
+	auto expmetadata = m_metadata.split(finalcontrol);
+	size_t njobs = expmetadata.back()->m_rows; //should be the same
+	cerr << "Reformed metadata: " << m_metadata << endl;
+	for(size_t ii=0; ii<expmetadata.size(); ii++) {
+		cerr << "Arg : " << ii << " metadata: " << endl 
+			<< expmetadata[ii] << endl;
+	}
+	
 	InputT tmp;
-	m_inputs.resize(m_metadata.size());
+	m_inputs.resize(njobs.size());
 	ostringstream oss;
 	string suffix = "";
 	
+	// for each preinput
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 #ifndef NDEBUG
 		cerr << "Input spec: " << *fit << endl;
@@ -960,22 +1048,40 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 			cerr << "\tSuffix " << match.suffix().str() << endl;
 #endif //NDEBUG
 
-			string varname = match[2].str(); 
-			auto lvalit = m_revlabels.find(varname);
-			if(lvalit != m_revlabels.end()) {
-				// single argument, locally defined global variable, (expansion 
-				// should have already been resolved, in resolveGlobals)
-				assert(match[1].str() != "*");
-
-				// push inputs onto each job
-				for(unsigned int jj = 0; jj < m_metadata.size(); jj++) {
-					size_t arg = lvalit->second;
-					string mdval = m_mdlookup[arg][m_metadata[jj][arg]];
-					m_inputs[jj].push_back(InputT(mdval));
+			// if it is in m_metadata, then just fill in the value
+			// and create the argument
+			auto localit = std::find(m_metadata.m_labels.begin(), 
+						m_metadata.m_labels.end(), varname);
+			if(localit != m_metadata.m_labels.end()) {
+				size_t col = (localit-m_metadata.m_labels.begin());
+				for(size_t jj=0; jj<m_metadata.m_rows; jj++) {
+					m_inputs[jj].push_back(InputT(m_metadata.gets(col, jj)));
 				}
-			} else {
-				// persumably this should be a reference 
-				ret = resolveInputReference(match[1], match[3], match[4], match[5]);
+				continue;
+			} 
+			
+			// it exists in the split metadata, so add values from 
+			// each split off version to the command lines
+			localit = std::find(expmetadata.back().begin(), expmetadata.back().end(),
+						varnmae);
+			if(localit != expmetadata.back().end()) {
+				size_t col = (localit-expmetadata.back().begin());
+				for(auto mit=expmetadata.begin(); mit!=expmetadata.end(); mit++){
+					for(size_t jj=0; jj<mit->m_rows; jj++) {
+						m_inputs[jj].push_back(InputT(mit->gets(col, jj)));
+					}
+				}
+				continue;
+			}
+
+			// if it is in neither, then it should be a reference to another
+			// process
+			ret = resolveInputReference(match[1], match[3], match[4], match[5]);
+		} else {
+			// global arguments with local values
+				for(size_t jj=0; jj<mit->m_rows; jj++) {
+					// 
+				}
 			}
 		}
 
