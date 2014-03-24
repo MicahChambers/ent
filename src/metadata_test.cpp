@@ -44,7 +44,7 @@ int main()
 	fmri.nest(mdsubjects);
 	cerr << fmri<< endl;
 
-	fmri.merge(longit);
+	fmri.ujoin(longit);
 	cerr << fmri << endl;
 
 	MetaData newfmri("subjects", subjects);
@@ -57,7 +57,50 @@ int main()
 	newtimes.nest(mdtimes);
 	cerr << "newtimes: "<< newtimes << endl;
 
-	newfmri.merge(newtimes);
+	newfmri.ujoin(newtimes);
 	cerr << "newfmri: "<< newfmri << endl;
+
+	list<string> control;
+	{
+	auto tmp = newfmri.split(control); 
+	cerr << "new fmri split to: " << endl;
+	for(auto& vv : tmp) {
+		cerr << "----------------------------------------"<< endl;
+		cerr << vv << endl;
+		cerr << "----------------------------------------"<< endl;
+	}
+	}
+	control.push_back("types");
+	{
+	auto tmp = newfmri.split(control); 
+	cerr << "new fmri split to (when controlling for subject: " << endl;
+	for(auto& vv : tmp) {
+		cerr << "----------------------------------------"<< endl;
+		cerr << vv << endl;
+		cerr << "----------------------------------------"<< endl;
+	}
+	}
+	
+	control.push_back("subjects");
+	{
+	auto tmp = newfmri.split(control); 
+	cerr << "new fmri split to (when controlling for subject, type: " << endl;
+	for(auto& vv : tmp) {
+		cerr << "----------------------------------------"<< endl;
+		cerr << vv << endl;
+		cerr << "----------------------------------------"<< endl;
+	}
+	}
+	
+	control.push_back("frun");
+	{
+	auto tmp = newfmri.split(control); 
+	cerr << "new fmri split to (when controlling for subject, type, runs: " << endl;
+	for(auto& vv : tmp) {
+		cerr << "----------------------------------------"<< endl;
+		cerr << vv << endl;
+		cerr << "----------------------------------------"<< endl;
+	}
+	}
 }
 

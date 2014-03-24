@@ -265,7 +265,7 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
 	return out;
 }
 
-int
+	int
 Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 {
 #ifndef NDEBUG
@@ -273,19 +273,10 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 #endif//NDEBUG
 	string tmp = spec;
 
-	int error;
-
-	list<list<vector<vector<string>>>> stack;
+	list<list<MetaData>> stack;
 	list<int> methods;
-	m_labels.clear();
-	m_revlabels.clear();
-	m_mdlookup.clear();
+	int litc = 0;
 
-	// TODO create lookup table of values, rather than copying all those
-	// strings over and over
-
-	// innermost list: a variant of the inputs [0, 1, file]
-	// next list : expanded set of variants [[0,1,file],[0,1,file2]], 
 	// next list : unmerged list of expanded variants, e,g {A} and {B} in {A}*{B}
 	// top list : stack of different depths
 	//
@@ -293,57 +284,64 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 	// stack[1] = list of all expanded variables at depth 1...
 	// stack[0][0] = set in need of expansion, level 0
 	// stack[0][1] = set in need of expansion, level 0,
-	// stack[0][0][0] = one variant of expanded variables at level 0
-	// stack[0][1][1] = one variant of expanded variables at level 0
 	//
 	// When we leave a level (ie close a parenthesis), all the 
 	// members of the list at that level will get merged:
 	// ({A}*{B}*C), then the result gets added to the level up,
 	// for expansion when that level gets merged
-	
+
 	// make the top layer, everything else gets merged into it eventually
-	stack.push_back(list<vector<vector<string>>>());
+	stack.push_back(list<MetaData>());
 	for(unsigned int ii = 0 ; ii < spec.length(); ii++) {
 		if(spec[ii] == '(') {
 			// we are going down 
 			methods.push_back(0);
-			stack.push_back(list<vector<vector<string>>>());
+			stack.push_back(list<MetaData>());
 		} else if(spec[ii] == ')') {
 			// we are going up, split up previous level
-			
+
 			// it points to the layer above the current
-			list<list<vector<vector<string>>>>::iterator lit = stack.end();
+			list<list<MetaData>>::iterator lit = stack.end();
 			lit--; lit--;
-			
+
 			if(stack.back().size() == 1) {
 				// only 1 element, add it to second to above list
 				lit->push_back(stack.back().back());
 			} else if(methods.back() == 1) {
 				// we need to merge together every element in the 
 				// current level, we will accumulate them in merged
-				vector<vector<string>> merged;
+				MetaData merged;
 
 				while(!stack.back().empty()) {
-					merged = nest(merged, stack.back().front());
+					if(merged.nest(stack.back().front()))
+						return -1;
 					stack.back().pop_front();
 				}
-				
+
 				// finally place the merged metadata on the end of the 
 				// list in the above level, to be merged there
 				lit->push_back(merged);
 			} else if(methods.back() == 2) {
-				vector<vector<string>> merged;
-				
+				MetaData merged;
+
 				while(!stack.back().empty()) {
-					merged = zip(merged, stack.back().front(), error);
+					if(merged.zip(stack.back().front()) != 0) 
+						return -1;
 					stack.back().pop_front();
 				}
 
-				// zip can fail if the inputs aren't the same size. We make
-				// an exception for size 0
-				if(error) 
-					return -1;
-				
+				// finally place the merged metadata on the end of the 
+				// list in the above level, to be merged there
+				lit->push_back(merged);
+			} else if(methods.back() == 3) {
+				MetaData merged;
+
+				while(!stack.back().empty()) {
+					if(merged.union(stack.back().front()) != 0) 
+						return -1;
+					stack.back().pop_front();
+				}
+
 				// finally place the merged metadata on the end of the 
 				// list in the above level, to be merged there
 				lit->push_back(merged);
@@ -354,29 +352,30 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 			methods.pop_back();
 		} else if(spec[ii] == '*') {
 			if(methods.back() != 0 && methods.back() != 1) {
-				cerr << "Error, conflicting merge methods '*' vs. ',' given" << endl;
+				cerr << "Error, conflicting merge methods '*' given" << endl;
 				return -1;
 			}
 			methods.back() = 1;
 		} else if(spec[ii] == ',') {
 			if(methods.back() != 0 && methods.back() != 2) {
-				cerr << "Error, conflicting merge methods '*' vs. ',' given" << endl;
+				cerr << "Error, conflicting merge methods ',' given" << endl;
 				return -1;
 			}
 			methods.back() = 2;
+		} else if(spec[ii] == 'u') {
+			if(methods.back() != 0 && methods.back() != 3) {
+				cerr << "Error, conflicting merge methods 'u' given" << endl;
+				return -1;
+			}
+			methods.back() = 3;
 		} else if(isspace(spec[ii])) {
 			//ignore
 
 		} else if(spec[ii] == '{') {
-
-			// todo labels will be screwed up by expansion {*} process
-
 			// variable name
 			int prev = ii;
 			ii = spec.find_first_of('}',ii);
 			string varname = spec.substr(prev+1,ii-prev-1);
-			m_labels.push_back(varname);
-			m_revlabels[varname] = m_labels.size()-1;
 
 			auto searchresult = parent->m_vars.find(varname);
 			if(searchresult == parent->m_vars.end()) {
@@ -386,41 +385,40 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 			}
 
 			// the inner vectors are just single until they get expanded
-			stack.back().push_back(vector<vector<string>>());
-			stack.back().back().resize(searchresult->second.size());
+			vector<string> tmp(searchresult->second.size());
 			auto it = searchresult->second.begin(); 
 			for(int ii = 0; it != searchresult->second.end(); ii++) {
-				stack.back().back()[ii].resize(1);
-				stack.back().back()[ii][0] = *it;
+				tmp[ii][0] = *it;
 				it++;
 			}
+
+			stack.back().emplace(stack.back().end(),varname, tmp));
+
 #ifndef NDEBUG
-			cerr << "Variable " << varname << " expanded to ";
-			printCC(stack.back().back());
+			cerr << "Variable " << varname << " expanded to " 
+				<< stack.back().back()) << endl;
 #endif //NDEBUG
 		} else {
-			// literal
+			// literal, just a single word like ({hello})
 			int prev = ii;
 			ii = spec.find_first_of("() {}",ii);
-			m_labels.push_back("");
 
 			string str = spec.substr(prev,ii-prev);
+			ostringstream oss;
+			oss << "lit" << litc++ << endl;
 
 			// the inner vectors are just single until they get expanded
-			stack.back().push_back(vector<vector<string>>());
-			stack.back().back().resize(1);
-			stack.back().back()[0].resize(1);
-			stack.back().back()[0][0] = str;
-
+			vector<string> tmp(1, str);
+			stack.back().emplace(strack.back().end(), MetaData(oss.str(), tmp));
 #ifndef NDEBUG
-			cerr << "Literal" << str << " becomes ";
-			printCC(stack.back().back());
+			cerr << "Literal" << str << " becomes " << stack.back().back()) 
+				<< endl;
 #endif //NDEBUG
 		}
 
 	}
 
-	m_metadata.clear();
+	m_metadata = stack.back().back();
 	std::swap(m_metadata, stack.back().back());
 	return 0;
 }
@@ -433,8 +431,8 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		std::string sid, std::string defsource, 
 		std::string inspec, std::string outspec, std::string cmd, 
 		Chain* parent)
-		: m_cmd(cmd), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
-		m_sid(getSid(m_id)), m_type(PROC), m_prevLink(defsource), m_parent(parent)
+: m_cmd(cmd), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
+	m_sid(getSid(m_id)), m_type(PROC), m_prevLink(defsource), m_parent(parent)
 {
 	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
 	const sregex_token_iterator tokEnd;
@@ -443,7 +441,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	m_resolved = false;
 	m_visited = false;
 	m_populated = false;
-	
+
 	// parse outspec as files
 	m_preinputs.clear();
 	m_preoutputs.clear();
@@ -458,12 +456,12 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		cerr << "\t" << *fnIt << endl;
 	}
 
-//	// expand multi-argument expressions, and remove the pre-expanded version
-//	cerr << "Expanded Input Spec" << endl;
-//	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-//		argExpand(fit, preinputs);
-//		cerr << "\t" << *fit << endl;
-//	}
+	//	// expand multi-argument expressions, and remove the pre-expanded version
+	//	cerr << "Expanded Input Spec" << endl;
+	//	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
+	//		argExpand(fit, preinputs);
+	//		cerr << "\t" << *fit << endl;
+	//	}
 
 	// split out output files, (but ignore commas inside {}
 	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
@@ -529,12 +527,6 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
 	cerr << "Metadata Expansion:  "; printCC(m_metadata); cerr << endl;
 #endif //NDEBUG
-
-//	// parse inputs without resolving external references
-//	if(resolveInternal() != 0) {
-//		m_err = -1;
-//		return;
-//	}
 
 }
 
@@ -659,6 +651,7 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 
 			//merge metadata
 			string control = (*expIt)[4].str();
+			;
 			if(mergeMetadata(m_metadata, linkit->m_metadata, 
 						(*expIt)[1].str() == "*", control) < 0) {
 				cerr << "Error resolving inputs/metadata" << endl;
@@ -692,12 +685,7 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
  *
  * @return 
  */
-int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& tgtmd,
-		std::vector<std::vector<std::string>>>& tgtlookup, 
-		std::vector<std::string>>& tgtlabels, 
-		const std::vector<std::vector<std::string>>& srcmd, 
-		std::vector<std::vector<std::string>>>& srclookup, 
-		const std::vector<std::string>& srclabels,
+int Chain::Link::mergeMetadata(MetaData& src, 
 		bool expand, std::string control)
 {
 	if(expand && !control.empty()) {
@@ -707,22 +695,11 @@ int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& tgtmd,
 	}
 	
 #ifndef NDEBUG
-	cerr << "Merging: A: " << endl;
-	printC(tgtlabels);
-	cerr << endl;
-	printCC(tgtmd);
-	cerr << endl;
-	printC(srclabels);
-	cerr << endl << " and B: " << endl;
-	printCC(srcmd);
+	cerr << "Merging: A: " << m_metadata << endl;
+	cerr << "And B: " << src << endl;
 #endif// NDEBUG
 	if(expand) {
-		// each job group value is a job number -> group number
-		// without any control all job numbers have the same;
-		// with no expansion all job numbers have unique group numbers;
-		// initialize groups as everyone the same, then split up
-		// based on metadata
-		vector<int> mapping(srcmd.size(),0); // job -> group
+		list<int> 
 
 		int base = 1;
 		for(size_t cc=0; cc<srclabels.size(); cc++) { 

@@ -1,10 +1,138 @@
 #include "metadata.h"
 
 #include <iomanip>
+#include <memory>
 
 using namespace std;
 
-int MetaData::merge(MetaData& rhs)
+#define VERYDEBUG
+
+vector<shared_ptr<MetaData>> MetaData::split(const list<string>& control)
+{
+	list<int> cols;
+	for(auto it=control.begin(); it!=control.end(); it++) {
+		bool found = false;
+		for(size_t ii=0; ii<m_labels.size(); ii++) {
+			if(*it == m_labels[ii]) {
+				cols.push_back(ii);
+				found = true;
+				break;
+			}
+		}
+		if(!found) {
+			cerr << "Warning, controlling for a variable that does not exist" 
+				<< " in current metadata." << endl;
+		}
+	}
+
+	// produce groups by iterating through the lists of particular
+	// metadata values and multiplying by the previous max value + 1,
+	// thus mapping things into higher and higher ranges
+	vector<int> groups(m_rows);
+	int gmax = 1;
+	// for each column in the input
+	for(auto cit=cols.begin(); cit!=cols.end(); cit++) {
+		// for each value of the current metadata column
+		for(auto mit=m_search[*cit].begin(); mit!=m_search[*cit].end(); mit++) {
+			int mdval = mit->first;
+			auto& valrows = mit->second; // list of rows with mdval
+			
+			// for each element in the list of rows with the value
+			for(auto rit=valrows.begin(); rit!=valrows.end(); rit++) {
+				int row = *rit;
+				groups[row] = groups[row]+gmax*mdval;
+			}
+		}
+		for(size_t ii=0; ii<groups.size(); ii++)
+			gmax = gmax < groups[ii] ? groups[ii]: gmax;
+		gmax++;
+	}
+
+#ifndef VERYDEBUG 
+	cerr << "Group from controls: " << endl;
+	for(auto vv:control) cerr << vv << "," << endl;
+	for(size_t ii=0; ii<groups.size(); ii++) {
+		cerr << ii << ":" << groups[ii] << endl;
+	}
+#endif 
+	
+	map<int,int> remap;
+	for(size_t ii=0,jj=0; ii<groups.size(); ii++) {
+		auto it = remap.insert(make_pair(groups[ii],jj));
+		if(it.second) 
+			jj++;
+	}
+
+	for(size_t ii=0; ii<groups.size(); ii++) {
+		groups[ii] = remap[groups[ii]];
+	}
+
+#ifndef VERYDEBUG 
+	cerr << "Group from controls: " << endl;
+	for(auto vv:control) cerr << vv << "," << endl;
+	for(size_t ii=0; ii<groups.size(); ii++) {
+		cerr << ii << ":" << groups[ii] << endl;
+	}
+#endif //NDEBUG
+	
+	// save the size of each group into remap
+	remap.clear();
+	for(size_t ii=0; ii<groups.size(); ii++) {
+		auto retstat = remap.insert(make_pair(groups[ii],-1));
+		retstat.first->second++;
+		cerr << ii << ", " << groups[ii] << retstat.first->second << endl;
+	}
+
+#ifndef NDEBUG
+	cerr << "Group from controls: " << endl;
+	for(auto vv:control) cerr << vv << "," << endl;
+	for(size_t ii=0; ii<groups.size(); ii++) {
+		cerr << ii << ":" << groups[ii] << "(" << remap[groups[ii]] << ")" << endl;
+	}
+#endif //NDEBUG
+
+	// create all the metadata, and intiialize column-wise data
+	vector<std::shared_ptr<MetaData>> out(remap.size());
+	for(size_t ii=0; ii<out.size(); ii++) {
+		out[ii].reset(new MetaData(m_cols, remap[ii]));
+		
+
+		// update m_labels and m_lookup
+		for(size_t cc=0; cc<m_cols; cc++) {
+			out[ii]->m_lookup[cc]=m_lookup[cc];
+			out[ii]->m_labels[cc]=m_labels[cc];
+		}
+	}
+
+	// set all the remap counts to 0 again (to count)
+	for(auto vv:remap) 
+		vv.second=0;
+
+	// for each row
+	for(int rr=0; rr<m_rows; rr++) {
+		// increment count for group
+		size_t outrow = remap[groups[rr]]++;
+
+		// copy current row into output
+		for(size_t cc=0; cc<m_cols; cc++) {
+			out[groups[rr]]->m_data[outrow*m_cols+cc] = geti(rr,cc);
+		}
+
+	}
+	
+	// set up search
+	for(size_t ii=0; ii<out.size(); ii++) {
+		for(unsigned int cc=0 ; cc<m_cols; cc++) {
+			for(unsigned int rr=0 ; rr<out[ii]->m_rows; rr++) {
+				out[ii]->m_search[cc][out[ii]->geti(rr,cc)].push_back(rr);
+			}
+		}
+	}
+
+	return out;
+}
+
+int MetaData::ujoin(MetaData& rhs)
 {
 	if(&rhs == this) {
 		cerr << "Error, can't nest metadat with itself" << endl;
@@ -252,7 +380,7 @@ int MetaData::zip(const MetaData& rhs)
 
 ostream& operator<<(ostream& os, const MetaData& md)
 {
-	os << "Metadata:"; 
+	os << "MetaData:"; 
 	os << md.m_rows << "x" << md.m_cols << endl << endl;
 
 	for(size_t cc=0 ; cc<md.m_cols; cc++) {

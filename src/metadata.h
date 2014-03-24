@@ -8,13 +8,29 @@
 class MetaData
 {
 public:
-	MetaData() {
-		m_cols = 0;
-		m_rows = 0;
+	
+	/**
+	 * @brief This form only does datastructure initialization since there
+	 * are no known values to put in the data structures.
+	 *
+	 * @param cols
+	 * @param rows
+	 */
+	MetaData(size_t cols = 0, size_t rows = 0) 
+	{
+		m_cols = cols;
+		m_rows = rows;
 		m_lookup.clear();
+		m_lookup.resize(cols);
+		
 		m_data.clear();
+		m_data.resize(cols*rows);
+
 		m_labels.clear();
+		m_labels.resize(cols);
+
 		m_search.clear();
+		m_search.resize(cols);
 	};
 
 	MetaData(std::string label, const std::vector<std::string>& input)
@@ -39,10 +55,11 @@ public:
 		}
 	};
 
+	std::vector<std::shared_ptr<MetaData>> split(
+			const std::list<std::string>& control);
 	int nest(const MetaData& rhs);
 	int zip(const MetaData& rhs);
-	int merge(MetaData& rhs);
-	
+	int ujoin(MetaData& rhs);
 	
 	/* Data Structures */
 	// [row*m_cols+column]
