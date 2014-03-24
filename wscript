@@ -37,7 +37,7 @@ def configure(conf):
         conf.env.LINKFLAGS.append('-pg')
     elif opts['debug']:
         conf.env.DEFINES.append('DEBUG=1')
-        conf.env.CXXFLAGS.extend(['-Wno-unused-parameter', '-Wno-sign-compare', '-Wno-unused-local-typedefs', '-Wall', '-Wextra','-g'])
+        conf.env.CXXFLAGS.extend(['-Wno-unused-parameter', '-Wno-sign-compare', '-Wno-unused-local-typedefs', '-Wall', '-Wextra','-gdwarf-4'])
     else:
         conf.env.DEFINES.append('NDEBUG=1')
         conf.env.CXXFLAGS.extend(['-O3', '-march=nocona'])

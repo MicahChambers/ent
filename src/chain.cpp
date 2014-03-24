@@ -30,9 +30,9 @@ using std::vector;
 // 3 = Dependency ID Number ie 1.2
 // 4 = Argument Number ie 3-5,3
 // 5 = Control ie | hello, this is a test
-const std::regex CurlyRe("\\{(\\*)?\\s*((?:([0-9.]*)\\s*:)?"
+const std::regex CurlyRe("\\s*\\{(\\*)?\\s*((?:([0-9.]*)\\s*:)?"
 		"(?:\\s*([-,_[:alnum:]]*)\\s*)?(?:\\s*"
-		"\\|([,_\\s[:alnum:]]*))?)\\s*\\}");
+		"\\|([,_\\s[:alnum:]]*))?)\\s*\\}\\s*");
 const std::sregex_iterator ReEnd;
 
 
@@ -42,14 +42,14 @@ const std::sregex_iterator ReEnd;
 vector<int> getId(string in)
 {
 	const auto periodRe = regex("\\s*\\.\\s*");
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 	
 	// get the id for this line
 	vector<int> id;
 
 	// Iterate Through Non-comman values
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), periodRe, -1);
-	for(; regIt != regEnd ; ++regIt) {
+	for(; regIt != tokEnd ; ++regIt) {
 		for(auto ival : regIt->str()){
 			if(ival > '9' || ival < '0') 
 				return vector<int>();
@@ -103,11 +103,11 @@ void printCC(const C& in)
 
 int csvToList(string in, list<string>& csv)
 {
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 	regex commaRe(",(?![^{]*\\})");
 	csv.clear()
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
-	for(; regIt != regEnd ; ++regIt) {
+	for(; regIt != tokEnd ; ++regIt) {
 		csv.push_back(*regIt);
 	}
 	return 0;
@@ -115,11 +115,11 @@ int csvToList(string in, list<string>& csv)
 
 int csvToList(string in, list<int>& csv)
 {
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 	regex commaRe(",(?![^{]*\\})");
 	csv.clear()
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
-	for(; regIt != regEnd ; ++regIt) {
+	for(; regIt != tokEnd ; ++regIt) {
 		for(auto v : *regIt) {
 			if(v > '9' || v < '0')
 				return -1;
@@ -141,7 +141,6 @@ int csvToList(string in, list<int>& csv)
  */
 int argExpand(list<string>::iterator& exp, list<string>& lout)
 {
-	const std::sregex_iterator regEnd;
 	const std::regex expRe("(\\{\\*?"
 			"(?:\\s*[0-9.]*\\s*:)?)"
 			"(?:\\s*([a-zA-Z0-9,\\-]*)\\s*)?"
@@ -159,7 +158,7 @@ int argExpand(list<string>::iterator& exp, list<string>& lout)
 
 		string rterm = args[2].str();
 		sregex_iterator it(rterm.cbegin(), rterm.cend(), rangeRe);
-		for(; it != regEnd; it++) {
+		for(; it != ReEnd; it++) {
 			string low = (*it)[1].str();
             string hi = (*it)[2].str();
 			string single = (*it)[3].str();
@@ -266,31 +265,6 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
 	return out;
 }
 
-//	// produce file list
-//	std::smatch match; 
-//	m_files.resize(m_metadata.size());
-//	for(unsigned int ii = 0 ; ii < m_files.size(); ii++) {
-//
-//		m_files[ii].resize(filepatterns.size());
-//
-//		// for each file pattern, replace the variable name with
-//		// variables from metadata
-//		for(unsigned int ff = 0; ff < filepatterns.size(); ff++) {
-//			m_files[ii][ff] = filepatterns[ff];
-//			cerr << m_files[ii][ff] << " <-> ";
-//
-//			// for each variable, replace variable name with metadata
-//			for(unsigned int vv = 0 ; vv < m_labels.size(); vv++) {
-//				std::regex reg("\\{\\s*"+m_labels[vv]+"\\s*\\}");
-//				while(std::regex_search(m_files[ii][ff], match, reg)) {
-//					m_files[ii][ff] = match.prefix().str() + m_metadata[ii][vv] + 
-//						match.suffix().str();
-//				}
-//			}
-//			cerr << m_files[ii][ff] << endl;
-//		}
-//	}
-
 int
 Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 {
@@ -305,6 +279,10 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 	list<int> methods;
 	m_labels.clear();
 	m_revlabels.clear();
+	m_mdlookup.clear();
+
+	// TODO create lookup table of values, rather than copying all those
+	// strings over and over
 
 	// innermost list: a variant of the inputs [0, 1, file]
 	// next list : expanded set of variants [[0,1,file],[0,1,file2]], 
@@ -459,7 +437,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		m_sid(getSid(m_id)), m_type(PROC), m_prevLink(defsource), m_parent(parent)
 {
 	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 
 	m_err = 0;
 	m_resolved = false;
@@ -473,7 +451,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	// split out input files, (but ignore commas inside {}
 	cerr << "Initial Input Spec" << endl;
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
-				commaRe, -1); fnIt != regEnd ; ++fnIt) {
+				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
 		list<string> tmp;
 		list<string> tmp;
 		m_preinputs.push_back(*fnIt);
@@ -489,7 +467,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 
 	// split out output files, (but ignore commas inside {}
 	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
-				commaRe, -1); fnIt != regEnd ; ++fnIt) {
+				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
 		m_preoutputs.push_back(*fnIt);
 	}
 
@@ -518,7 +496,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 
 {
 	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 
 	m_err = 0;
 	m_resolved = false;
@@ -535,7 +513,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	m_preinputs.clear();
 	cerr << "Initial Input Spec" << endl;
 	sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), commaRe, -1);
-	for(; fnIt != regEnd ; ++fnIt) {
+	for(; fnIt != tokEnd ; ++fnIt) {
 		m_preinputs.push_back(*fnIt);
 		cerr << "\t" << *fnIt << endl;
 	}
@@ -637,14 +615,14 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 	if(m_resolved)
 		return 0;
 	
-	const std::sregex_iterator regEnd;
+	const std::sregex_iterator ReEnd;
 
 	// resolve inputs
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 		cerr << "Input spec: " << *fit << endl;
 		// we have a token filename, now expand  {* } variables
 		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
-		for(; expIt != regEnd ; ++expIt) {
+		for(; expIt != ReEnd; ++expIt) {
 			
 			cerr << "Prefix " << expIt->prefix().str() << endl;
 			cerr << "Match " << (*expIt)[0].str() << endl;
@@ -668,7 +646,6 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 				return -1;
 			}
 
-
 			cerr << (*expIt)[3] << endl;
 			printC(getId((*expIt)[3]));
 			cerr << endl;
@@ -680,11 +657,10 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
 			// make sure the inputs' metadta and outputs are up to date
 			linkit->resolveTree(callstack);
 
-			// TODO merge metadata
 			//merge metadata
 			string control = (*expIt)[4].str();
-			bool expand = (*expIt)[1].str() == "*";
-			if(mergeMetadata(m_metadata, linkit->m_metadata, expand, control) < 0) {
+			if(mergeMetadata(m_metadata, linkit->m_metadata, 
+						(*expIt)[1].str() == "*", control) < 0) {
 				cerr << "Error resolving inputs/metadata" << endl;
 				return -1;
 			}
@@ -716,13 +692,147 @@ int Chain::Link::resolveExternalMetadata(list<string>& callstack)
  *
  * @return 
  */
-int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& target,
-		std::vector<std::vector<std::string>> source, 
+int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& tgtmd,
+		std::vector<std::vector<std::string>>>& tgtlookup, 
+		std::vector<std::string>>& tgtlabels, 
+		const std::vector<std::vector<std::string>>& srcmd, 
+		std::vector<std::vector<std::string>>>& srclookup, 
+		const std::vector<std::string>& srclabels,
 		bool expand, std::string control)
 {
+	if(expand && !control.empty()) {
+		cerr << "Control term without expansion {*} term given in " << "{" 
+			<< expand << dep << ":" << argn << "|" << controlstr << endl;
+		return -1;
+	}
+	
+#ifndef NDEBUG
+	cerr << "Merging: A: " << endl;
+	printC(tgtlabels);
+	cerr << endl;
+	printCC(tgtmd);
+	cerr << endl;
+	printC(srclabels);
+	cerr << endl << " and B: " << endl;
+	printCC(srcmd);
+#endif// NDEBUG
+	if(expand) {
+		// each job group value is a job number -> group number
+		// without any control all job numbers have the same;
+		// with no expansion all job numbers have unique group numbers;
+		// initialize groups as everyone the same, then split up
+		// based on metadata
+		vector<int> mapping(srcmd.size(),0); // job -> group
+
+		int base = 1;
+		for(size_t cc=0; cc<srclabels.size(); cc++) { 
+			// only control for the label if it is in controls
+			if(!regex_search(controlstr, srclabels[cc]))
+				continue;
+			
+			int ngroup = 0;
+
+			map<string,int> groups; // value -> group
+			for(size_t jj = 0 ; jj < srcmd.size(); jj++) {
+				auto tryinsert = groups.insert(make_pair(srcmd[jj][cc], ngroup));
+
+				// if insertion succeeded, we have a new group
+				if(tryinsert.second) groupno++;
+
+				// mapping = oldmap + currgroup*base
+				mapping[jj] += tryinsert.first.second*base;
+			}
+
+			int maxgroup = INT_MIN;
+			for(size_t jj = 0 ; jj < mapping.size(); jj++) 
+				maxgroup = max(maxgroup, mapping[jj]);
+			base = maxgroup+1;
+		}
+
+		// now we have groupings for the input metadata, now we need to map
+		// each group in the input metadata to output metadata
+		// for each input group
+		//     find the column for the matching metadata
+//		// map group # -> source job number
+//		for(unsigned int ii = 0 ; ii < jobgroups.size(); ii++)
+//			mapping.insert(jobgroups[ii], ii);
+		
+	} else {
+
+		size_t origsz=tgtlabels.size();
+		for(size_t ii=0; ii<tgtlabels.size(); ii++){
+			for(size_t jj=0; jj<srclabels.size(); jj++){
+				if(tgtlabels[oc] == srclabels[ii]) {
+					found = true;
+					break;
+				}
+			}
+			if(!found) 
+				tgtlabels.push_back(srclabels[ii]);
+		}
+
+		vector<vector<int>> tmpmd;
+		for(size_t jj=0; jj<tgtlabels.size(); jj++) {
+			// for each original metadata line, find all matching
+			// in the src metadata, and append them
+			auto jobs = getJobs();
+			
+		}
+
+		/// TODO what about about paired metadata in the source!
+		// add all the new columns
+		size_t colsz = newcolumns.size()+tgtlabels.size();
+		size_t oldcolsz = newcolumns.size();
+		size_t newsz = tgtmd.size();
+		size_t oldsz = tgtmd.size();
+		for(auto it = newcolumns.begin(); it != newcolumns.end(); it++)
+			newsz *= srclookup[*it].size();
+
+		tgtmd.resize(newsz);
+		tgtlabels.resize(colsz);
+		tgtlookup.resize(colsz);
+
+		size_t jj = 0;
+		for(auto it = newcolumns.begin(); it != newcolumns.end(); it++) {
+			for(size_t kk=0; kk<oldsz; kk++) {
+				tgtmd[jj].resize(colsz));
+
+				tgtmd[jj]
+
+		}
+			if(!found) {
+				// just maintains the the value->order mapping, by finding
+				// the first time each value is mentioning and incrementing
+				// from there
+				map<string,int> valueOrder;
+				size_t kk =0;
+				for(size_t jj=0; jj<srcmd.size(); jj++) {
+					auto ret = values.insert(make_pair(srcmd[jj][ii], kk));
+
+					// new value found
+					if(ret.second) kk++;
+				}
+				oc = tgtlabels.size();
+				tgtlabels.push_back(srclabels[ii]);
+
+				// add column
+				size_t oldsz = tgtmd.size();
+				tgtmd.resize(tgtmd.size()*valueOrder.size());
+				for(auto it=valueOrder.begin(); it!=valueOrder.end(); it++) {
+					for(kk=0; kk<oldsz; kk++)
+						tgtmd[oldsz*it->second+jj].push_back(it->first);
+				}
+			}
+#ifndef NDEBUG
+			cerr << "Source Column " << ii << " = " << oc << " target" << endl;
+#endif// NDEBUG
+		}
+	}
 	list<string> contlist;
 	list<list<string>> sourcetmp;
 	
+	
+
 	return 0;
 }
 
@@ -737,7 +847,6 @@ int Chain::Link::mergeMetadata(std::vector<std::vector<std::string>>& target,
 int
 Chain::Link::resolveGlobals()
 {
-	const std::sregex_iterator regEnd;
 	std::smatch args;
 
 #ifndef NDEBUG
@@ -760,7 +869,7 @@ Chain::Link::resolveGlobals()
 
 			// for each variable like "{subject}" in {subject}/{run}
 			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
-			for(; expIt != regEnd ; ++expIt) {
+			for(; expIt != ReEnd ; ++expIt) {
 
 				// ignore global variables that we have metadata for, unless
 				// it calls for expansion ( we will fill just directly use 
@@ -827,7 +936,7 @@ Chain::Link::resolveGlobals()
 
 /**
  * @brief This function iterates through the inspec list and 
- * updates the m_inputs array.
+ * finalizes the m_inputs array.
  *
  * @param callstack
  *
@@ -835,8 +944,6 @@ Chain::Link::resolveGlobals()
  */
 int Chain::Link::resolveInputs(list<string>& callstack)
 {
-
-	const std::sregex_iterator regEnd;
 
 	std::smatch match;
 
@@ -854,6 +961,8 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 	int ret;
 	InputT tmp;
 	m_inputs.resize(m_metadata.size());
+	ostringstream oss;
+	string suffix = "";
 	
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 #ifndef NDEBUG
@@ -861,6 +970,7 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 #endif //NDEBUG
 
 		if(regex_match(*fit, match, CurlyRe)) {
+			// single argument
 
 #ifndef NDEBUG
 			cerr << "\tPrefix " << match.prefix().str() << endl;
@@ -873,118 +983,58 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 			cerr << "\tSuffix " << match.suffix().str() << endl;
 #endif //NDEBUG
 
-			// single argument
 			string varname = match[2].str(); 
 			auto lvalit = m_revlabels.find(varname);
 			if(lvalit != m_revlabels.end()) {
+				// single argument, locally defined global variable, (expansion 
+				// should have already been resolved, in resolveGlobals)
 				assert(match[1].str() != "*");
 
 				// push inputs onto each job
-				for(unsigned int jj = 0; jj < m_metadata.size(); jj++)
-					m_inputs[jj].push_back(InputT(m_metadata[jj][lvalit->second]));
+				for(unsigned int jj = 0; jj < m_metadata.size(); jj++) {
+					size_t arg = lvalit->second;
+					string mdval = m_mdlookup[arg][m_metadata[jj][arg]];
+					m_inputs[jj].push_back(InputT(mdval));
+				}
 			} else {
 				// persumably this should be a reference 
 				ret = resolveInputReference(match[1], match[3], match[4], match[5]);
 			}
 		}
 
-
-		// for each variable like "{subject}" in {subject}/{run}
-		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
-		for(; expIt != regEnd ; ++expIt) {
-
-		}
-
-			
-
-			if((*expIt)[2] == "*") {
-				// need to expand
-				auto gvalit = m_parent->m_vars.find(varname);
-				if(gvalit == m_parent->m_vars.end()) {
-					cerr << "Error, " << *fit << " specifies expansion of the "
-						"variable " << (*expIt)[1] << " but that variable has "
-						"not (yet) been defined. Did you place you variable "
-						"declaration in the beginning of the file? " << endl;
-						return -1;
-				}
-
-				for(unsigned int jj = 0; jj < m_metadata.size(); jj++) {
-					m_inputs[ii].resize(gvalit->second.size());
-					for(unsigned int kk = 0 ; kk < gvalit->second.size(); kk++) {
-						tmp.source = NULL;
-						tmp.filename = expIt->prefix() + gvalit->second[kk] + 
-									expIt->suffix();
-						m_inputs[jj][kk] = ;
-						// warning TODO, may still have a variable to resolve
-					}
-				}
-
-			}
-
-			continue;
-		}
-
-		// just one variable
-		std::sregex_iterator expIt(*fit.cbegin(), *fit.cend(), CurlyRe);
-		for(; expIt != regEnd ; ++expIt) {
-			cerr << "Prefix " << expIt->prefix().str() << endl;
-			cerr << "Match " << (*expIt)[0].str() << endl;
-			cerr << "Varname: " << (*expIt)[1].str() << endl;
-			cerr << "Expand?" << (*expIt)[2].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
-			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
-			cerr << "Control: " << (*expIt)[5].str() << endl;
-			cerr << "Suffix " << expIt->suffix().str() << endl;
-
-			// if its just a variable name, should match everything but {* }
-
-			auto gvalit = m_parent->m_vars.find(varname);
-			auto lvalit = m_revlabels.find(varname);
-			
-			// todo iterate until this is false
-			if(gvalit != m_parent->m_vars.end() && lvalit == m_revlabels.end()) {
-				if(gvalit->second.size() > 1) {
-					cerr << "Error! Variable lookup resolved to an array, but without"
-						" process has not been provided with an expansion method"
-						" for that variable! (" << m_sid << ")" << endl;
+		// Expand, replace all global variables with local values in string
+		cerr << "Resolving: " < match[2].str();
+		for(unsigned int jj = 0 ; jj < m_metadata.size(); jj++) {
+			suffx = "";
+			oss.str("");
+			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
+			for(; expIt != ReEnd ; ++expIt) {
+				string varname = match[2].str(); 
+				auto lvalit = m_revlabels.find(varname);
+				if(lvalit == m_revlabels.end()) {
+					cerr << " Uknown variable in expression " << *fit << 
+						<< " we don't currenlty allow references to other "
+						"processes outputs in the middle of other strings "
+						"that could lead to /home/johndoe/home/bill when you "
+						"want /home/bill. I hope you understand and forgive." 
+						<< endl;
 					return -1;
 				}
 
-				// successfully resolved, recurse on the new inspec,
-				// possible values like like:
-				// {subject}/{run}/
-				cerr << varname << " -> " << gvalit->second.front() << endl;
-				cerr << inspec << " -> " << 
-					return resolveArgument(gvalit->second.front());
+				// keep the suffix in case this is the last
+				suffix = expIt->suffx(); 
 
-				gvalit = m_parent->m_vars.find(varname);
-				lvalit = m_revlabels.find(varname);
+				// build string
+				size_t arg = lvalit->second;
+				string mdval = m_mdlookup[arg][m_metadata[jj][arg]];
+				oss << expIt->prefix() << mdval;
 			}
 
-			if(lvalit != m_revlabels.end()) {
-				// resolveable input, just replace 
-				
-			} else {
-
-			}
-			// now that all the variables are locally defined or external
-			// references...
-
-			for(unsigned int 
-			// if it is an external reference, should match all these
-			bool expand = (*expIt)[2].str() == "*";
-			vector<int> linkid = getId((*expIt)[3].str());
-			int argnum = atoi((*expIt)[4].str());
-			list<int> control;
-			csvToList((*expIt)[5].str(), control);
-
-			auto linkit = m_parent->m_links.find(linkid);
-			
-			oss << expIt->prefix().str() << (*expIt)[0];
+			oss << suffix;
+			cerr << "\t" << oss.str() << endl;
+			m_inputs[jj].push_back(InputT(oss.str()));
 		}
-		if(resolveArgument(*fit) < 0) 
-			return -1;
-	}
+	}		
 
 	return 0;
 }
@@ -1003,8 +1053,8 @@ int Chain::Link::resolveInputs(list<string>& callstack)
  *
  * @return 
  */
-int Chain::Link::resolveInputReference(string expand, string dep, string argn, 
-			string controlstr)
+int Chain::Link::resolveInputReference(string dep, string argn)
+			
 {
 	if(dep.empty()) {
 #ifndef NDEBUG
@@ -1015,8 +1065,6 @@ int Chain::Link::resolveInputReference(string expand, string dep, string argn,
 
 	vector<int> linkid = getId(dep);
 	int argnum = atoi(argn.c_str());
-	list<int> control;
-	csvToList(controlstr, control);
 	
 	list<int> args;
 	argExpand(argn.str(), args);
@@ -1033,122 +1081,40 @@ int Chain::Link::resolveInputReference(string expand, string dep, string argn,
 
 	list<std::pair<string,string>> job_mdata;
 
-	if(expand != "*" && !control.empty()) {
-		cerr << "Control term without expansion {*} term given in " << "{" 
-			<< expand << dep << ":" << argn << "|" << controlstr << endl;
-		return -1;
-	}
-	
-	if(expand == "*") {
-		if(control) {
-			// each job group value is a job number -> group number
-			// without any control all job numbers have the same
-			// with no expansion, all job numbers have unique group numbers,
-			// initialize groups as everyone the same, then split up
-			// based on metadata
-			vector<int> jobgroups(tmp.source->m_metadata.size(),0);;
+	// create InputT for the current term, in all of the jobs
+	for(size_t jj = 0; jj < m_metadata.size(); jj++) {
+		job_mdata.clear();
+		for(size_t aa = 0; aa < m_labels.size(); aa++) 
+			string mdval = m_mdlookup[aa][m_metadata[jj][aa]];
+			job_mdata.push_back(make_pair(m_labels[aa],mdval));
 
-			int base = 1;
-			for(auto cc : control) {
-				// get the colum of the control
-				// ignore labels that don't vary in the given source
-				auto slabelIt = tmp.source->m_revlabels.find(*cc);
-				if(slabelIt == tmp.source->m_revlabels.end()) 
-					continue;
-				int column = slabelIt->second;
+		// get the matching jobs in input jobs' metadata
+		// [(subject,sid),(fmri,fid)...]
+		auto jobs = tmp.source->getJobs(job_mdata);
+		if(jobs.size() == 0) {
+			cerr << "Metadata mismatch between " << m_sid << " and " 
+				<< tmp.source->m_sid << ". Relevent metadata: " << endl;
+			for(auto& vv : job_mdata) 
+				cerr << "\t" << vv.first << "=" << vv.second << endl;
+			return -1;
+		}
 
-				// count of each particular value, next one gets this index
-				// ie, the first subject=s1 gets 0, the second subject=s1 gets
-				// 1 and so on
-				map<string,int> valcounts(varIt->second.size(),0);
-				for(size_t jj = 0 ; jj < tmp.source->m_metadata.size(); jj++) {
-					string value = tmp.source->m_metadata[jj][column];
-					jobgroups[jj] += (valcounts[value]++)*base;
-				}
-
-				// TODO test, create a mapping
-
-				int maxcount = INT_MIN;
-				for(auto vv : valcounts) {
-					maxcount = vv.second > maxcount ? vv.second : maxcount;
-				}
-
-				base = base * 
-				// get the list of values for the current metadata
-				// ie subject = [s1, s2, s3]
-				auto varIt = m_parent->m_vars.find(*cc);
-				if(varIt == m_parent->m_vars.end()) {
-					cerr << "Error, unknown variable used for control in "
-							"expansion within " << "{" << expand << dep 
-							<< ":" << argn << "|" << controlstr << endl;
-					return -1;
-				}
-
-				// for each value of the metadata variable, create a list of 
-				// jobs that match the particular value, ie all the jobs where
-				// subject = 101
-				for(auto& lval : varIt->second) {
-					job_mdata.clear();
-					job_mdata.push_back(make_pair(*cc, *lval));
-					auto tmplist = tmp.source->getJobs(job_mdata);
-					if(
-				}
-
-				// merge tmpjg, 
-			}
-			for(size_t aa = 0 ; aa < tmp.source->m_outputs.size(); aa++) {
-				tmp.argnum = aa;
-				for(size_t sjj = 0 ; sjj < tmp.source->m_metadata.size(); sjj++) {
-					tmp.procnum = sjj;
-					for(size_t jj = 0 ; jj < m_metadata.size(); jj++)
-						m_inputs[jj] = tmp;
-				}
-			}
-		} else {
-			for(size_t sjj = 0 ; sjj < tmp.source->m_metadata.size(); sjj++) {
-				tmp.procnum = sjj;
-				for(size_t aa = 0 ; aa < tmp.source->m_outputs[sjj].size(); aa++) {
-					tmp.argnum = aa;
-					// this may generate a huge number of repitive tasks
-					// if this is the only variable on the command line,
-					// we will resolve that later by hashing inputs
-					for(size_t jj = 0 ; jj < m_metadata.size(); jj++)
-						m_inputs[jj] = tmp;
-				}
+		// fill in args if they were left empty
+		if(args.empty()) {
+			// since args is empty, default to all the outputs
+			for(size_t aa = 0 ; aa < linkit->second->m_outputs[jj].size(); aa++) {
+				args.push_back(aa);
 			}
 		}
-	} else {
-		// create InputT for the current term, in all of the jobs
-		for(size_t jj = 0; jj < m_metadata.size(); jj++) {
-			job_mdata.clear();
-			for(size_t aa = 0; aa < m_metadata[jj].size(); aa++) 
-				job_mdata.push_back(make_pair(m_labels[aa],m_metadata[jj][aa]));
-
-			// get the matching job in input jobs metadata
-			// [(subject,sid),(fmri,fid)...]
-			auto jobs = tmp.source->getJobs(job_mdata);
-			if(jobs.size() != 1) {
-				cerr << "Metadata mismatch between " << m_sid << " and " 
-					<< tmp.source->m_sid << ". Relevent metadata: " << endl;
-				for(auto& vv : job_mdata) 
-					cerr << "\t" << vv.first << "=" << vv.second << endl;
-				return -1;
-			}
-
-			tmp.procnum = jobs.front();
-			if(args.empty()) {
-				// since args is empty, default to all the outputs
-				for(size_t aa = 0 ; aa < linkit->second->m_outputs[jj].size(); 
-								aa++) {
-					tmp.outnum = aa;
-					m_inputs[jj].push_back(tmp);
-				}
-			} else {
-				// just push the requested args
-				for(auto ait = args.begin(); ait = args.end(); ait++) {
-					tmp.outnum = *ait;
-					m_inputs[jj].push_back(tmp);
-				}
+		
+		for(auto ait = args.begin(); ait = args.end(); ait++) {
+			tmp.outnum = *ait;
+			
+			// there may be several matching jobs if we have 
+			// collapsed multiple jobs into a single job
+			for(auto it = jobs.begin(); it != jobs.end(); jobs++) {
+				tmp.procnum = *it;
+				m_inputs[jj].push_back(tmp);
 			}
 		}
 	}
@@ -1182,7 +1148,7 @@ Chain::parseFile(string filename)
 	regex contRe("(.*)\\.\\.\\.\\s*");
 	regex emptyRe("\\s*");
 	regex curlyRe("\\{\\s*([^{]*)\\s*\\}"); // Curly-brace search
-	const sregex_token_iterator regEnd;
+	const sregex_token_iterator tokEnd;
 	std::smatch args;
 
 	vector<int> prevleaf;
@@ -1240,7 +1206,7 @@ Chain::parseFile(string filename)
 
 			// Split comma separated values into tokens
 			sregex_token_iterator regIt(value.cbegin(), value.cend(), commaRe, -1);
-			for(; regIt != regEnd ; ++regIt) 
+			for(; regIt != tokEnd ; ++regIt) 
 				ret.first->second.push_back(*regIt);
 		} else if(regex_match(line, args, inputRe)) {
 			/*****************************************

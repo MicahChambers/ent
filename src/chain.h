@@ -143,8 +143,15 @@ class Chain::Link
 		// [run1,subject1]
 		// [run1,subject2]
 		// [run2,subject1]
-		// [run2,subject2] ...
-		std::vector<std::vector<std::string>> m_metadata;
+		// [run2,subject2], integers refer to location
+		std::vector<std::vector<int>> m_metadata;
+
+		// COL in metadata x Value in Metadata
+		// m_lookup[aa][metadata[jj][aa]] = "subject1"
+		//
+		// to get the subject of column jj:
+		// m_lookup[m_revlabels["subject"]][metadata[jj][m_revlabels["subject"]]]
+		std::vector<std::vector<std::string>> m_mdlookup;
 
 		// labels for columns of m_metadata, 
 		std::vector<std::string> m_labels;					// column -> label

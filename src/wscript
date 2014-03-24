@@ -8,3 +8,4 @@ def build(bld):
     bld.program(target = 'glob_test', source = 'glob_test.cpp', use='tclap PTHREAD')
     bld.program(target = 'expand_test', source = 'expand_test.cpp', use='tclap')
     bld.program(target = 'reg_test', source = 'reg_test.cpp', use='')
+    bld.program(target = 'metadata_test', source = 'metadata_test.cpp', use='')
