@@ -23,14 +23,6 @@ public:
 		m_search.clear();
 	};
 
-	~MetaData(){
-		cerr << *this << endl;
-		m_lookup.clear();
-		m_data.clear();
-		m_labels.clear();
-		m_search.clear();
-	}
-
 	MetaData(string label, const vector<string>& input)
 	{
 		m_rows=input.size();
@@ -144,16 +136,8 @@ int MetaData::merge(MetaData& rhs)
 		return -1;
 	}
 
-	cerr << "This: " << *this << endl;
-	cerr << "Other: " << rhs << endl;
-	vector<list<int>> rhsMatches(oldrows);
-
-	cerr << "Colmatch (" << colmatch.size() << ")" << endl;
-	for(auto vv: colmatch) {
-		cerr << "\t" << vv << endl;
-	}
-
 	// for each row in original, find our value and the matching column in rhs
+	vector<list<int>> rhsMatches(oldrows);
 	size_t newrows = 0;
 	for(size_t rr=0; rr<oldrows; rr++) {
 		
@@ -165,56 +149,43 @@ int MetaData::merge(MetaData& rhs)
 			}
 		}
 
-		cerr << "Matching" << endl;
-		for(auto vv : limits) {
-			cerr << " col of rhs: " << vv.first << "input #:" << vv.second << endl;
-		}
-
 		// trying to find the columns that match all the overlapping metadata
+		// we start with the first list of matching metadata,
+		// then reduce the list size with each successive metadata
+		// pass
 		rhsMatches[rr] = rhs.m_search[limits.back().first][limits.back().second];
 		limits.pop_back();
 		while(!limits.empty()) {
 			auto& l2 = rhs.m_search[limits.back().first][limits.back().second];
-			cerr << "List: ";
-			for(auto vv : rhsMatches[rr]) 
-				cerr << vv << ", ";
-			cerr << endl;
 			auto it1 = rhsMatches[rr].begin();
 			
-			cerr << "List: ";
-			for(auto vv : l2) 
-				cerr << vv << ", ";
-			cerr << endl;
 			auto it2 = l2.begin();
 			for(; it1 != rhsMatches[rr].end() && it2 != l2.end(); it1++, it2++) {
-				cerr << *it1 << ", " << *it2 << endl;
 				if(*it1 < *it2) {
 					it1 = rhsMatches[rr].erase(it1);
 				} else if(*it1 > *it2) {
 					it2++;
 				}
 			}
-			cerr << "Reduced List: ";
-			for(auto vv : rhsMatches[rr]) 
-				cerr << vv << ", ";
-			cerr << endl;
 			limits.pop_back();
 		}
-
-		// l1 now has the rows of rhs that match metadata in rr
-		cerr << "Matching rows to " << rr << endl;
 
 		for(auto it = rhsMatches[rr].begin(); it != rhsMatches[rr].end(); it++) 
 			newrows++;
 	}
 
+	// create the new datastructure
 	m_rows = newrows;
 	m_cols += uniqueCols.size();
 	vector<int> olddata(m_cols*m_rows);
 	std::swap(olddata, m_data);
 
+	// for each original row, and row in rhs that matches the 
+	// original row...
 	for(size_t rr=0,r1=0; r1<rhsMatches.size(); r1++) {
 		for(auto it=rhsMatches[r1].begin(); it!=rhsMatches[r1].end(); rr++,it++) {
+
+			// add the colums from the rhs row to the original columns,
 			size_t cc;
 			for(cc=0; cc < oldcols; cc++) {
 				m_data[rr*m_cols + cc] = olddata[r1*oldcols+cc];
@@ -225,6 +196,7 @@ int MetaData::merge(MetaData& rhs)
 		}
 	}
 
+	// update labels and lookup
 	auto it3 = uniqueCols.begin();
 	m_labels.resize(m_cols);
 	m_lookup.resize(m_cols);
@@ -233,33 +205,8 @@ int MetaData::merge(MetaData& rhs)
 		m_lookup[cc] = rhs.m_lookup[*it3];
 
 	}
-
-//	m_lookup.resize(m_cols+rhs.m_cols);
-//	m_labels.resize(m_cols+rhs.m_cols);
-//	for(size_t ii=m_cols; ii<m_cols+rhs.m_cols; ii++){
-//		m_lookup[ii] = rhs.m_lookup[ii-m_cols];
-//		m_labels[ii] = rhs.m_labels[ii-m_cols];
-//	}
-//
-//	size_t oldcols = m_cols;
-//	size_t oldrows = m_rows;
-//	m_cols += rhs.m_cols;
-//	m_rows *= rhs.m_rows;
-//
-//	vector<int> tmpdata(m_rows*m_cols);
-//	std::swap(tmpdata, m_data);
-//
-//	for(unsigned int ii = 0 ; ii < oldrows; ii++) {
-//		for(unsigned int jj = 0 ; jj < rhs.m_rows; jj++) {
-//			for(unsigned int kk = 0 ; kk < oldcols; kk++)
-//				this->geti(ii*rhs.m_rows+jj, kk) = tmpdata[ii*oldcols+kk];
-//
-//			for(unsigned int kk = 0 ; kk < rhs.m_cols; kk++)
-//				this->geti(ii*rhs.m_rows+jj, oldcols+kk) = rhs.geti(jj,kk);
-//		}
-//	}
-//
-	// there is probably a faster way to handle search updating
+	
+	// there is probably a faster way to handle search updating...
 	m_search.clear();
 	m_search.resize(m_cols);
 	for(unsigned int cc=0 ; cc<m_cols; cc++) {
@@ -461,5 +408,18 @@ int main(int argc, char** argv)
 
 	fmri.merge(longit);
 	cerr << fmri << endl;
+
+	MetaData newfmri("subjects", subjects);
+	newfmri.zip(mdtypes);
+	newfmri.nest(mdruns);
+	cerr << "newfmri: "<< newfmri << endl;
+
+	MetaData newtimes("subjects", subjects);
+	newtimes.zip(mdtypes);
+	newtimes.nest(mdtimes);
+	cerr << "newtimes: "<< newtimes << endl;
+
+	newfmri.merge(newtimes);
+	cerr << "newfmri: "<< newfmri << endl;
 }
 
