@@ -59,7 +59,7 @@ public:
 	int resolveTree();
 
 private:
-	std::map<std::vector<int>,Link, vintComp> m_links;
+	std::map<std::vector<int>,std::shared_ptr<Link>, vintComp> m_links;
 	std::map<std::string,std::list<std::string>> m_vars;
 
 //	std::vector<int> getId(std::string);
@@ -118,7 +118,7 @@ class Chain::Link
 
 		struct InputT
 		{
-			InputT(Link* src, int pn, int on) : 
+			InputT(std::shared_ptr<Link> src, int pn, int on) : 
 				source(src), procnum(pn), outnum(on), filename("") {};
 
 			InputT(std::string fn) :
@@ -129,7 +129,7 @@ class Chain::Link
 
 			// if the input is the output of something else, keep track 
 			// of it
-			Link* source;
+			std::shared_ptr<Link> source;
 			int procnum;
 			int outnum;
 			

@@ -519,7 +519,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 
 #ifndef NDEBUG
 	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
-	cerr << "Metadata Expansion:  "; printCC(m_metadata); cerr << endl;
+	cerr << "Metadata Expansion:  " << m_metadata << endl;
 #endif //NDEBUG
 
 }
@@ -710,7 +710,7 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			}
 	
 			// make sure the inputs' metadta and outputs are up to date
-			linkit->second.resolveTree(callstack);
+			linkit->second->resolveTree(callstack);
 
 			//merge metadata
 			list<string> control;
@@ -722,7 +722,7 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			
 			// array of list of rows that run together, for each output
 			// row, it gives the input rows that matched/were brought together
-			shared_ptr<MetaData> reduce = linkit->second.m_metadata.split(control);
+			auto reduce = linkit->second->m_metadata.split(control);
 			if(m_metadata.ujoin(*reduce) < 0) {
 				cerr << "Error resolving inputs/metadata" << endl;
 				return -1;
@@ -771,15 +771,17 @@ Chain::Link::resolveNonExpandableGlobals()
 			cerr << "Prefix " << expIt->prefix().str() << endl;
 			cerr << "Match " << (*expIt)[0].str() << endl;
 			cerr << "Expand?" << (*expIt)[1].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
-			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
-			cerr << "Control: " << (*expIt)[4].str() << endl;
+			cerr << "Variables: " << (*expIt)[2].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
+			cerr << "Control: " << (*expIt)[5].str() << endl;
 			cerr << "Suffix " << expIt->suffix().str() << endl;
 #endif //NDEBUG
 
 				// ignore global variables that we have metadata for
-				auto mit = m_metadata.m_labels.find((*expIt)[TODO]);
-				if(mit != m_revlabels.end()) {
+				auto mit = std::find(m_metadata.m_labels.begin(), 
+							m_metadata.m_labels.end(), (*expIt)[2]);
+				if(mit != m_metadata.m_labels.end()) {
 					continue;
 				}
 
@@ -845,12 +847,11 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 	if(m_resolved)
 		return 0;
 	
-	assert(m_metadata.size() > 0);
-	assert(m_labels.size() == m_resolved.size());
+	assert(m_metadata.m_rows > 0);
 
 	InputT tmp;
-	m_inputs.resize(m_metadata.size());
-	ostringstream oss;
+	m_inputs.resize(m_metadata.m_rows);
+	std::ostringstream oss;
 	string suffix = "";
 	
 	// for each preinput
@@ -865,15 +866,15 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 #ifndef NDEBUG
 			cerr << "\tPrefix " << match.prefix().str() << endl;
 			cerr << "\tMatch " << match[0].str() << endl;
-			cerr << "\tVarname: " << match[1].str() << endl;
-			cerr << "\tExpand?" << match[2].str() << endl;
+			cerr << "\tExpand?" << match[1].str() << endl;
+			cerr << "\tVarname: " << match[2].str() << endl;
 			cerr << "\tDep Number: " << match[3].str() << endl;
 			cerr << "\tVar/Number: " << match[4].str() << endl;
 			cerr << "\tControl: " << match[5].str() << endl;
 			cerr << "\tSuffix " << match.suffix().str() << endl;
 #endif //NDEBUG
 			int argnum = atoi(match[4].str().c_str());
-
+			string varname = match[2].str();
 			// if it is in m_metadata, then just fill in the value
 			// and create the argument
 			auto localit = std::find(m_metadata.m_labels.begin(), 
@@ -885,22 +886,23 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 				}
 			} else { 
 				// it is a reference, find the referenced link
-				auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
+				auto linkit = m_parent->m_links.find(getId(match[3]));
 				if(linkit != m_parent->m_links.end()) {
 					cerr << "External Reference Var!" << endl;
 				}
+				linkit->second->resolveTree(callstack);
 
 				// contstruct a mapping between outmetadata and 
 				for(size_t jj=0; jj<m_metadata.m_rows; jj++) {
-					vector<string> vals(m_cols);
+					vector<string> vals(m_metadata.m_cols);
 					list<int> matchrows;
 					// fill pairs to search for variables in metadata
 					for(size_t kk=0; kk<m_metadata.m_cols; kk++) 
 						vals[kk]=m_metadata.gets(jj,kk);
 
 					// search for matching metadata in source link
-					if(linkit->m_metadata.search(m_metadata.m_labels, vals, 
-								&matchrows)!=0) {
+					if(linkit->second->m_metadata.search(m_metadata.m_labels, 
+								vals, &matchrows)!=0) {
 						return -1;
 					}
 
@@ -912,22 +914,23 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 					for(auto it=matchrows.begin(); it!=matchrows.end(); it++){
 						// add all the matching rows to current input
 						tmp.outnum = argnum;
-						tmp.proc = *it;
-						tmp.source = &(*linkit);;
+						tmp.procnum = *it;
+						tmp.source = linkit->second;
 					}
 				}
 			}
 		} else {
 			// global arguments with local values
-			for(unsigned int jj = 0 ; jj < m_metadata.size(); jj++) {
-				suffx = "";
+			for(unsigned int jj = 0 ; jj < m_metadata.m_rows; jj++) {
+				suffix = "";
 				oss.str("");
 				std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
 				for(; expIt != ReEnd ; ++expIt) {
 					string varname = match[2].str(); 
-					auto lvalit = m_metadata.m_labels.find(varname);
+					auto lvalit = std::find(m_metadata.m_labels.begin(),
+							m_metadata.m_labels.end(), varname);
 					if(lvalit == m_metadata.m_labels.end()) {
-						cerr << " Uknown variable in expression " << *fit << 
+						cerr << " Uknown variable in expression " << *fit 
 							<< " we don't currenlty allow references to other "
 							"processes outputs in the middle of other strings "
 							"that could lead to /home/johndoe/home/bill when you "
@@ -937,11 +940,11 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 					}
 
 					// keep the suffix in case this is the last
-					suffix = expIt->suffx(); 
+					suffix = expIt->suffix(); 
 
 					// build string
-					size_t arg = lvalit->second;
-					string mdval = m_mdlookup[arg][m_metadata[jj][arg]];
+					size_t arg = lvalit-m_metadata.m_labels.begin();
+					string mdval = m_metadata.gets(jj,arg);
 					oss << expIt->prefix() << mdval;
 				}
 
@@ -1081,8 +1084,7 @@ Chain::parseFile(string filename)
 						getSid(curleaf), getSid(prevleaf), 
 						args[2], args[3], this));
 
-			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
-						newleaf->m_id, newleaf));
+			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
 				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
 					<< filename << ":" << linenum << endl;
@@ -1189,4 +1191,6 @@ int Chain::resolveTree()
 			return -1;
 		}
 	}
+
+	return 0;
 }
