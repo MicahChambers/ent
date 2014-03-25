@@ -2,14 +2,139 @@
 
 #include <iomanip>
 #include <sstream>
+#include <set>
 #include <memory>
+#include <unordered_set>
 
 using namespace std;
 
-#define VERYDEBUG
+//#define VERYDEBUG
+
+
+struct vintComp {
+	bool operator() (const std::vector<int>& lhs, const std::vector<int>& rhs) const
+	{
+		for(unsigned int ii = 0; ii < std::min(lhs.size(), rhs.size()); ii++) {
+			if(lhs[ii] < rhs[ii])
+				return true;
+			if(lhs[ii] > rhs[ii])
+				return false;
+		}
+		
+		// if all members are identical, then whichever is shorter is lesser
+		return lhs.size() < rhs.size();
+	}
+};
+
+int MetaData::search(vector<string> vars, vector<string> vals, list<int>* out)
+{
+	if(!out)
+		return 0;
+	out->clear();
+	if(vars.size() != vals.size()) {
+		return -1;
+	}
+	
+	bool found = true;
+	bool valid = true;
+	// resolve column names to column numbers
+	vector<int> cols;
+	vector<int> ivals;
+	for(size_t jj=0; jj<vars.size(); jj++) {
+		found = false;
+		valid = true;
+		for(size_t ii=0; ii<m_labels.size(); ii++) {
+			if(vars[jj] == m_labels[ii]) {
+				// found a match between labels and requested variables
+				cols.push_back(ii);
+
+				found = true;
+				valid = false;
+				// try to find the value from vals that matches from m_lookup
+				for(size_t kk=0; kk<m_lookup[ii].size(); kk++){
+					if(m_lookup[ii][kk] == vals[jj]) {
+						valid = true;
+						ivals.push_back(kk);
+					}
+				}
+				break;
+			}
+		}
+		if(!found) {
+			cerr << "Warning, controlling for a variable that does not exist" 
+				<< " in current metadata." << endl;
+		}
+		if(!valid) {
+			cerr << "Error, unknown value (" << vals[jj] << 
+				") for column : " << cols.back() << endl;
+			return -1;
+		}
+	}
+
+#ifdef VERYDEBUG
+	cerr << endl;
+	for(auto vv:vars)
+		cerr << vv <<",";
+	cerr << endl;
+	for(auto vv:vals)
+		cerr << vv <<",";
+	cerr << endl;
+	for(auto vv:cols)
+		cerr <<vv<<",";
+	cerr << endl;
+	for(auto vv:ivals)
+		cerr <<vv<<",";
+	cerr << endl;
+#endif// VERYDEBUG
+
+	if(cols.empty()) {
+		out->clear();
+		return 0;
+	}
+
+	// trying to find the columns that match all the overlapping metadata
+	// we start with the first list of matching metadata,
+	// then reduce the list size with each successive metadata
+	// pass
+	
+	// initialize to the first;
+	(*out) = m_search[cols[0]][ivals[0]];
+	out->sort();
+	for(size_t ii=1; ii<cols.size(); ii++){
+#ifdef VERYDEBUG
+		cerr << "Current: " << endl;
+		for(auto vv:*out)
+			cerr <<vv<<",";
+		cerr << endl;
+#endif VERYDEBUG
+
+		auto l2 = m_search[cols[ii]][ivals[ii]];
+		l2.sort();
+		auto it2 = l2.begin();
+		auto it1 = out->begin();
+		while(it1 != out->end()) {
+			if(it2 == l2.end() || *it1 < *it2) {
+				it1 = out->erase(it1);
+			} else if(*it1 > *it2) {
+				it2++;
+			} else {
+				it1++;
+				it2++;
+			}
+		}
+	}
+#ifdef VERYDEBUG
+	cerr << "Current: " << endl;
+	for(auto vv:*out)
+		cerr <<vv<<",";
+	cerr << endl;
+#endif
+	return 0;
+}
 
 shared_ptr<MetaData> MetaData::split(const list<string>& control)
 {
+	// resolve column names to column numbers
 	list<int> cols;
 	for(auto it=control.begin(); it!=control.end(); it++) {
 		bool found = false;
@@ -26,93 +151,57 @@ shared_ptr<MetaData> MetaData::split(const list<string>& control)
 		}
 	}
 
-	// produce groups by iterating through the lists of particular
-	// metadata values and multiplying by the previous max value + 1,
-	// thus mapping things into higher and higher ranges
-	vector<int> groups(m_rows);
-	int gmax = 1;
-	// for each column in the input
-	for(auto cit=cols.begin(); cit!=cols.end(); cit++) {
-		// for each value of the current metadata column
-		for(auto mit=m_search[*cit].begin(); mit!=m_search[*cit].end(); mit++) {
-			int mdval = mit->first;
-			auto& valrows = mit->second; // list of rows with mdval
-			
-			// for each element in the list of rows with the value
-			for(auto rit=valrows.begin(); rit!=valrows.end(); rit++) {
-				int row = *rit;
-				groups[row] = groups[row]+gmax*mdval;
-			}
+	if(cols.empty()) {
+		vector<string> tmp(1,"dummy");
+		return shared_ptr<MetaData>(new MetaData("dummy", tmp));
+	}
+
+	// find unique rows after only keeping control cols
+	std::set<vector<int>,vintComp> uniquerows;
+	vector<int> values(cols.size());
+	for(size_t ii=0; ii<m_rows; ii++){
+		auto it=cols.begin();
+		for(size_t cc=0; it!=cols.end(); cc++,it++){
+			values[cc] = geti(ii, *it);
 		}
-		for(size_t ii=0; ii<groups.size(); ii++)
-			gmax = gmax < groups[ii] ? groups[ii]: gmax;
-		gmax++;
+		uniquerows.insert(values);
 	}
-
-	// take intial values, and remap the first one in each group
-	// as group 1, the second as group 2 etc, so that equavalent
-	// values from control groups are mapped across outputs (
-	// and thus will be used in the same job, rather than differnet)
-	map<int,int> remap;
-	for(size_t ii=0; ii<groups.size(); ii++) {
-		auto itbool = remap.insert(make_pair(groups[ii],0));
-		groups[ii]=itbool.first->second++;
-	}
-	
-	// save the size of each group into remap
-	remap.clear();
-	for(size_t ii=0; ii<groups.size(); ii++) {
-		auto retstat = remap.insert(make_pair(groups[ii],0));
-		retstat.first->second++;
-	}
-
 #ifndef NDEBUG
-	cerr << "Group from controls: " << endl;
-	for(auto vv:control) cerr << vv << "," << endl;
-	for(size_t ii=0; ii<groups.size(); ii++) {
-		cerr << ii << ":" << groups[ii] << "(" << remap[groups[ii]] << ")" << endl;
+	for(auto it=uniquerows.begin(); it!=uniquerows.end(); it++){
+		cerr << "Unique Row:";
+		for(auto it2=it->begin(); it2!=it->end(); it2++)
+			cerr << *it2 << ',';
+		cerr << endl;
 	}
-#endif //NDEBUG
+#endif//NDEBUG
 
-	// create all the metadata, and intiialize column-wise data
-	vector<std::shared_ptr<MetaData>> out(remap.size());
-	for(size_t ii=0; ii<out.size(); ii++) {
-		out[ii].reset(new MetaData(m_cols, remap[ii]));
+	// create output data
+	shared_ptr<MetaData> out(new MetaData(cols.size(), uniquerows.size()));
 
-		// update m_labels and m_lookup
-		for(size_t cc=0; cc<m_cols; cc++) {
-			out[ii]->m_lookup[cc]=m_lookup[cc];
-			out[ii]->m_labels[cc]=m_labels[cc];
+	auto it=uniquerows.begin();
+	for(size_t rr=0; it!=uniquerows.end(); rr++,it++){
+		for(size_t cc=0; cc<out->m_cols; cc++) {
+			out->seti(rr, cc, (*it)[cc]);
 		}
 	}
 
-	// for each row
-	remap.clear();//keep the row count for each output
-	for(size_t rr=0; rr<m_rows; rr++) {
-		// increment count for group
-		auto itbool = remap.insert(make_pair(groups[rr],0));
-		size_t outrow = itbool.first->second++;
-
-		// copy current row into output
-		for(size_t cc=0; cc<m_cols; cc++) {
-			auto& tmp = *out[groups[rr]];
-			tmp.m_data[outrow*m_cols+cc] = geti(rr,cc);
-		}
-
+	auto it2=cols.begin();
+	for(size_t cc=0; cc<out->m_cols; it2++,cc++){
+		out->m_labels[cc] = m_labels[*it2];
+		out->m_lookup[cc] = m_lookup[*it2];
 	}
-	
+
 	// set up search
-	for(size_t ii=0; ii<out.size(); ii++) {
-		for(unsigned int cc=0 ; cc<m_cols; cc++) {
-			for(unsigned int rr=0 ; rr<out[ii]->m_rows; rr++) {
-				out[ii]->m_search[cc][out[ii]->geti(rr,cc)].push_back(rr);
-			}
+	for(unsigned int rr=0 ; rr<out->m_rows; rr++) {
+		for(unsigned int cc=0 ; cc<out->m_cols; cc++) {
+			out->m_search[cc][out->geti(rr,cc)].push_back(rr);
 		}
 	}
 
 	return out;
 }
 
+/* This needs more rigorous testing */
 int MetaData::ujoin(MetaData& rhs)
 {
 	if(&rhs == this) {
@@ -170,6 +259,7 @@ int MetaData::ujoin(MetaData& rhs)
 	size_t newrows = 0;
 	for(size_t rr=0; rr<oldrows; rr++) {
 		
+		//TODO just use the search function
 		// .first = column in rhs of matching tag .second = value in original 
 		list<pair<int,int>> limits; 
 		for(size_t cc=0; cc<colmatch.size(); cc++) {
@@ -189,10 +279,13 @@ int MetaData::ujoin(MetaData& rhs)
 			auto it1 = rhsMatches[rr].begin();
 			
 			auto it2 = l2.begin();
-			for(; it1 != rhsMatches[rr].end() && it2 != l2.end(); it1++, it2++) {
+			while(it1 != rhsMatches[rr].end() && it2 != l2.end()) {
 				if(*it1 < *it2) {
 					it1 = rhsMatches[rr].erase(it1);
 				} else if(*it1 > *it2) {
+					it2++;
+				} else {
+					it1++;
 					it2++;
 				}
 			}

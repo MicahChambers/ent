@@ -56,15 +56,11 @@ public:
 		}
 	};
 
-	shared_ptr<MetaData> splitApart(const std::list<std::string>& control,
-			std::vector<std::list<int>>* simul);
+	std::shared_ptr<MetaData> split(const std::list<std::string>& control);
 	int nest(const MetaData& rhs);
 	int zip(const MetaData& rhs);
 	int ujoin(MetaData& rhs);
 
-	// TODO reimplement split, should basically removed non-split cols
-	int split(const std::list<std::string>& control) const;
-	
 	/* Data Structures */
 	// [row*m_cols+column]
 	std::vector<int> m_data; 
@@ -78,10 +74,7 @@ public:
 	// [column][value] = list of rows with the given value
 	std::vector<std::map<int,std::list<int>>> m_search; 
 	
-	// TODO implement search
 	int search(std::vector<std::string> vars, std::vector<std::string> vals,
-			std::list<int>* out); 
-	int search(std::vector<std::string> vars, std::vector<int> vals,
 			std::list<int>* out); 
 
 	size_t m_rows;
@@ -90,6 +83,11 @@ public:
 	const int& geti(size_t rr, size_t cc) const {
 		assert(rr < m_rows && cc < m_cols);
 		return m_data[rr*m_cols+cc];
+	}
+	
+	void seti(size_t rr, size_t cc, int v) {
+		assert(rr < m_rows && cc < m_cols);
+		m_data[rr*m_cols+cc] = v;
 	}
 
 	int& geti(size_t rr, size_t cc) {

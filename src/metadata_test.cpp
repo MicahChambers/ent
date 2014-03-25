@@ -14,7 +14,7 @@ using namespace std;
 int main()
 {
 	vector<string> subjects({"john", "bill", "jack", "jill"});
-	vector<string> types({"bp", "euth", "bp", "euth"});
+	vector<string> types({"bp", "euth", "skiz", "old"});
 	vector<string> times({"march", "apil", "may"});
 	vector<string> runs({"fmri1", "fmri2", "fmri3"});
 	MetaData mdsubjects("subjects", subjects);
@@ -67,40 +67,71 @@ int main()
 
 	list<string> control;
 	{
-		auto tmp=newfmri;
-		tmp.split(control);
+		auto tmp = newfmri.split(control);
 		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << tmp << endl;
+		cerr << *tmp << endl;
 		cerr << "----------------------------------------"<< endl;
 	}
 	{
 		control.push_back("types");
-		auto tmp=newfmri;
-		tmp.split(control);
-		cerr << "new fmri split to: " << endl;
+		auto tmp = newfmri.split(control);
+		cerr << "new types split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << tmp << endl;
+		cerr << *tmp << endl;
 		cerr << "----------------------------------------"<< endl;
 	}
 	
 	{
 		control.push_back("subjects");
-		auto tmp=newfmri;
-		tmp.split(control);
-		cerr << "new fmri split to: " << endl;
+		auto tmp = newfmri.split(control);
+		cerr << "new subjects split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << tmp << endl;
+		cerr << *tmp << endl;
 		cerr << "----------------------------------------"<< endl;
 	}
 	{
 		control.push_back("frun");
-		auto tmp=newfmri;
-		tmp.split(control);
+		auto tmp = newfmri.split(control);
 		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << tmp << endl;
+		cerr << *tmp << endl;
 		cerr << "----------------------------------------"<< endl;
+	}
+	
+	control.clear();
+	control.push_back("subjects");
+	control.push_back("types");
+	control.push_back("times");
+	auto freduce = newfmri.split(control);;
+	cerr << "freduce: "<< *freduce << endl;
+	cerr << "newfmri: "<< newfmri << endl;
+
+	vector<string> s1(freduce->m_cols);
+	vector<string> v1(freduce->m_cols);
+	// find rows that match in original, should map to both fmri
+	for(size_t cc=0; cc<freduce->m_cols; cc++) {
+		s1[cc]=freduce->m_labels[cc];
+	}
+
+	list<int> match;
+	for(size_t rr=0; rr<freduce->m_rows; rr++){
+		for(size_t cc=0; cc<freduce->m_cols; cc++) {
+			v1[cc]=freduce->gets(rr,cc);
+		}
+		cerr << "Matching Values: " << endl;
+		for(size_t ii=0; ii<v1.size(); ii++) {
+			cerr << v1[ii] << ":" << s1[ii]<< ",";
+		}
+		cerr << endl;
+		newfmri.search(s1, v1, &match);
+		for(auto it=match.begin(); it!=match.end(); it++){
+			cerr << "Row: ";
+			for(size_t cc=0; cc<newfmri.m_cols; cc++) {
+				cerr << newfmri.gets(*it, cc) << ",";
+			}
+			cerr << endl;
+		}
 	}
 }
 
