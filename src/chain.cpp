@@ -1015,13 +1015,9 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 	//  	if NOTHING was given in finalcontrol, the single column
 	//  	is a dummy
 	// expmetadata -> each has all the original columns
-	auto expmetadata = m_metadata.split(finalcontrol);
-	size_t njobs = expmetadata.back()->m_rows; //should be the same
-	cerr << "Reformed metadata: " << m_metadata << endl;
-	for(size_t ii=0; ii<expmetadata.size(); ii++) {
-		cerr << "Arg : " << ii << " metadata: " << endl 
-			<< expmetadata[ii] << endl;
-	}
+	//
+	// simultaneous = list(list(jobs rows that basically are together))
+	auto simultaneous = m_metadata.split(finalcontrol);
 	
 	InputT tmp;
 	m_inputs.resize(njobs.size());

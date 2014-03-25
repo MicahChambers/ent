@@ -62,45 +62,40 @@ int main()
 
 	list<string> control;
 	{
-	auto tmp = newfmri.split(control); 
-	cerr << "new fmri split to: " << endl;
-	for(auto& vv : tmp) {
+		auto tmp=newfmri;
+		tmp.split(control);
+		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << *vv << endl;
+		cerr << tmp << endl;
 		cerr << "----------------------------------------"<< endl;
 	}
-	}
-	control.push_back("types");
 	{
-	vector<shared_ptr<MetaData>> tmp = newfmri.split(control); 
-	cerr << "new fmri split to (when controlling for subject: " << endl;
-	for(auto& vv : tmp) {
+		control.push_back("types");
+		auto tmp=newfmri;
+		tmp.split(control);
+		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << *vv << endl;
+		cerr << tmp << endl;
 		cerr << "----------------------------------------"<< endl;
-	}
 	}
 	
-	control.push_back("subjects");
 	{
-	vector<shared_ptr<MetaData>> tmp = newfmri.split(control); 
-	cerr << "new fmri split to (when controlling for subject, type: " << endl;
-	for(auto& vv : tmp) {
+		control.push_back("subjects");
+		auto tmp=newfmri;
+		tmp.split(control);
+		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << *vv << endl;
+		cerr << tmp << endl;
 		cerr << "----------------------------------------"<< endl;
 	}
-	}
-	
-	control.push_back("frun");
 	{
-	vector<shared_ptr<MetaData>> tmp = newfmri.split(control); 
-	cerr << "new fmri split to (when controlling for subject, type, runs: " << endl;
-	for(auto& vv : tmp) {
+		control.push_back("frun");
+		auto tmp=newfmri;
+		tmp.split(control);
+		cerr << "new fmri split to: " << endl;
 		cerr << "----------------------------------------"<< endl;
-		cerr << *vv << endl;
+		cerr << tmp << endl;
 		cerr << "----------------------------------------"<< endl;
-	}
 	}
 }
 

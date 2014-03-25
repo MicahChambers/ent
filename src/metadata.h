@@ -4,6 +4,7 @@
 #include <iostream>
 #include <map>
 #include <cassert>
+#include <memory>
 
 class MetaData
 {
@@ -55,11 +56,12 @@ public:
 		}
 	};
 
-	std::vector<std::shared_ptr<MetaData>> split(
+	std::vector<std::shared_ptr<MetaData>> splitApart(
 			const std::list<std::string>& control);
 	int nest(const MetaData& rhs);
 	int zip(const MetaData& rhs);
 	int ujoin(MetaData& rhs);
+	int split(const std::list<std::string>& control);
 	
 	/* Data Structures */
 	// [row*m_cols+column]
@@ -93,5 +95,9 @@ public:
 	}
 	
 	friend std::ostream& operator<<(std::ostream& os, const MetaData& md);
+
+private:
+	int splitHelp(const std::vector<std::shared_ptr<MetaData>>& in);
+
 };
 
