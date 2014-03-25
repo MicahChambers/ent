@@ -119,7 +119,7 @@ class Chain::Link
 			InputT(Link* src, int pn, int on) : 
 				source(src), procnum(pn), outnum(on), filename("") {};
 
-			InputT(string fn) :
+			InputT(std::string fn) :
 				source(NULL), procnum(-1), outnum(-1), filename(fn) {};
 			
 			InputT() :

@@ -17,7 +17,7 @@ public:
 	 * @param cols
 	 * @param rows
 	 */
-	MetaData(size_t cols = 0, size_t rows = 0) 
+	MetaData(size_t rows = 0, size_t cols = 0) 
 	{
 		m_cols = cols;
 		m_rows = rows;
