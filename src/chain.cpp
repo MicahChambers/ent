@@ -18,8 +18,6 @@ using std::regex;
 using std::regex_match;
 using std::sregex_token_iterator;
 
-using std::shared_ptr;
-
 using std::map;
 using std::list;
 using std::pair;
@@ -538,11 +536,13 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
  */
 int Chain::Link::resolveTree(list<string>& callstack)
 {
+	if(m_resolved) { 
+		return 0;
+	}
+
 #ifndef NDEBUG
 	cerr << "resolveTree " << this << endl;
 #endif //NDEBUG
-	if(m_resolved) 
-		return 0;
 
 	if(m_visited) {
 		cerr << "Revisited a link, appears to be a circular dependence" << endl;
@@ -554,7 +554,7 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	callstack.push_back(m_sid);
 
 	// perform expansion so that we resolve metadata without worrying about it
-	resolveExpandableGlobals();
+//	resolveExpandableGlobals();
 
 	// merge in metadata from all dependencies 
 	int ret = mergeExternalMetadata(callstack);
@@ -566,23 +566,26 @@ int Chain::Link::resolveTree(list<string>& callstack)
 		cerr << "Warning, cannot currently resolve inputs for " 
 			<< m_sid << " from " << m_sourcefile << ":" << m_line << endl;
 	}
-
-	// resolve all global varianble references, including 
-	// variables of variables of variables.... 
-	ret = resolveNonExpandableGlobals();
-	if(ret < 0) {
-		cerr << "Error resolving global variabes for " << m_sid 
-			<< " from " << m_sourcefile << ":" << m_line << endl;
-		return -1;
-	}
-
-	// sets all final inputs
-	ret = resolveInputs(callstack);
-	if(ret < 0) {
-		cerr << "Error resolving inputs for " << m_sid 
-			<< " from " << m_sourcefile << ":" << m_line << endl;
-		return -1;
-	}
+// TODO really only the metadata matters because it is what
+// we need to determine how many processes run. Everything else
+// can be done right before running
+//
+//	// resolve all global varianble references, including 
+//	// variables of variables of variables.... 
+//	ret = resolveNonExpandableGlobals();
+//	if(ret < 0) {
+//		cerr << "Error resolving global variabes for " << m_sid 
+//			<< " from " << m_sourcefile << ":" << m_line << endl;
+//		return -1;
+//	}
+//
+//	// sets all final inputs
+//	ret = resolveInputs(callstack);
+//	if(ret < 0) {
+//		cerr << "Error resolving inputs for " << m_sid 
+//			<< " from " << m_sourcefile << ":" << m_line << endl;
+//		return -1;
+//	}
 
 	m_resolved = true;
 	return 0;
@@ -664,6 +667,8 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 {
 #ifndef NDEBUG
 	cerr << "mergeExternalMetadata" << this << endl;
+	cerr << m_cmd << endl; 
+	cerr << "Initial Metadata:\n" << m_metadata << endl; 
 #endif //NDEBUG
 	
 	if(m_resolved)
@@ -681,14 +686,15 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			cerr << "Prefix " << expIt->prefix().str() << endl;
 			cerr << "Match " << (*expIt)[0].str() << endl;
 			cerr << "Expand?" << (*expIt)[1].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[2].str() << endl;
-			cerr << "Var/Number: " << (*expIt)[3].str() << endl;
-			cerr << "Control: " << (*expIt)[4].str() << endl;
+			cerr << "Variable : " << (*expIt)[2].str() << endl;
+			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
+			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
+			cerr << "Control: " << (*expIt)[5].str() << endl;
 			cerr << "Suffix " << expIt->suffix().str() << endl;
 #endif //NDEBUG
 
 			// ignore global variables for now 
-			auto gvalit = m_parent->m_vars.find((*expIt)[3]);
+			auto gvalit = m_parent->m_vars.find((*expIt)[2]);
 			if(gvalit != m_parent->m_vars.end()) {
 				cerr << "Global Var!" << endl;
 				continue;
@@ -701,12 +707,16 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 				return -1;
 			}
 
-			cerr << (*expIt)[3] << endl;
-			printC(getId((*expIt)[3]));
-			cerr << endl;
-			auto linkit = m_parent->m_links.find(getId((*expIt)[3]));
+			string depnum;
+			if((*expIt)[3].str().empty())
+				depnum = m_prevLink;
+			else
+				depnum = (*expIt)[3].str().empty();
+
+			cerr << depnum << endl;
+			auto linkit = m_parent->m_links.find(getId(depnum));
 			if(linkit != m_parent->m_links.end()) {
-				cerr << "External Reference Var!" << endl;
+				cerr << "External Reference Var! (" << depnum << ")" << endl;
 			}
 	
 			// make sure the inputs' metadta and outputs are up to date
@@ -729,7 +739,11 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			}
 		}
 	}
-
+	
+#ifndef NDEBUG
+	cerr << "Final Metadata:\n" << m_metadata << endl; 
+	cerr << m_metadata << endl;
+#endif //NDEBUG
 	return 0;
 }
 
@@ -1003,7 +1017,6 @@ Chain::parseFile(string filename)
 
 		// remove comments 
 		linebuff = linebuff.substr(0,linebuff.find('#'));
-		cerr << linebuff << endl;
 	
 		// line continued on the next line, just append without ...
 		if(regex_match(linebuff, args, contRe)) {
@@ -1012,7 +1025,6 @@ Chain::parseFile(string filename)
 		} else 
 			line = line + linebuff;
 
-		cerr << line << endl;
 		if(regex_match(line, args, emptyRe)) {
 			// do nothing
 		} else if(regex_match(line, args, varRe)) {
@@ -1080,9 +1092,9 @@ Chain::parseFile(string filename)
 			}
 
 			/* create new data structure */
-			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
+			auto newleaf = new Link(filename, linenum, 
 						getSid(curleaf), getSid(prevleaf), 
-						args[2], args[3], this));
+						args[2], args[3], this);
 
 			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
@@ -1114,12 +1126,11 @@ Chain::parseFile(string filename)
 			}
 
 			/* create new data structure */
-			auto newleaf = shared_ptr<Link>(new Link(filename, linenum, 
+			auto newleaf = new Link(filename, linenum, 
 						getSid(curleaf), getSid(prevleaf), 
-						args[2], args[3], args[4], this));
+						args[2], args[3], args[4], this);
 
-			auto ret = m_links.insert(pair<vector<int>,shared_ptr<Link>>(
-						newleaf->m_id, newleaf));
+			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
 				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
 					<< filename << ":" << linenum << endl;
