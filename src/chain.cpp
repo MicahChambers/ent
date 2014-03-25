@@ -5,6 +5,7 @@
 #include <regex>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <cstdlib>
 
 #include "chain.h"
@@ -105,7 +106,7 @@ int csvToList(string in, list<string>& csv)
 {
 	const sregex_token_iterator tokEnd;
 	regex commaRe(",(?![^{]*\\})");
-	csv.clear()
+	csv.clear();
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
 	for(; regIt != tokEnd ; ++regIt) {
 		csv.push_back(*regIt);
@@ -117,14 +118,14 @@ int csvToList(string in, list<int>& csv)
 {
 	const sregex_token_iterator tokEnd;
 	regex commaRe(",(?![^{]*\\})");
-	csv.clear()
+	csv.clear();
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
 	for(; regIt != tokEnd ; ++regIt) {
-		for(auto v : *regIt) {
+		for(auto v : regIt->str()) {
 			if(v > '9' || v < '0')
 				return -1;
 		}
-		csv.push_back(atoi(*regIt));
+		csv.push_back(atoi(regIt->str().c_str()));
 	}
 	return 0;
 }
@@ -157,7 +158,7 @@ int argExpand(list<string>::iterator& exp, list<string>& lout)
 		suffix = args[3].str();
 
 		string rterm = args[2].str();
-		sregex_iterator it(rterm.cbegin(), rterm.cend(), rangeRe);
+		std::sregex_iterator it(rterm.cbegin(), rterm.cend(), rangeRe);
 		for(; it != ReEnd; it++) {
 			string low = (*it)[1].str();
             string hi = (*it)[2].str();
@@ -181,13 +182,11 @@ int argExpand(list<string>::iterator& exp, list<string>& lout)
 		return -1;
 	}
 
-	ostringstream oss; 
-	ostringstream outoss; 
-
 	// nothing to splice in
 	if(intlist.empty()) 
 		return 0;
 
+	std::ostringstream oss; 
 	auto init = exp;
 	for(auto it = intlist.begin(); it != intlist.end(); it++) {
 		oss.str("");
@@ -336,7 +335,7 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 				MetaData merged;
 
 				while(!stack.back().empty()) {
-					if(merged.union(stack.back().front()) != 0) 
+					if(merged.ujoin(stack.back().front()) != 0) 
 						return -1;
 					stack.back().pop_front();
 				}
@@ -383,19 +382,18 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 				return -1;
 			}
 
-			// the inner vectors are just single until they get expanded
 			vector<string> tmp(searchresult->second.size());
 			auto it = searchresult->second.begin(); 
 			for(int ii = 0; it != searchresult->second.end(); ii++) {
-				tmp[ii][0] = *it;
+				tmp[ii] = *it;
 				it++;
 			}
 
-			stack.back().emplace(stack.back().end(),varname, tmp));
+			stack.back().emplace(stack.back().end(),varname, tmp);
 
 #ifndef NDEBUG
 			cerr << "Variable " << varname << " expanded to " 
-				<< stack.back().back()) << endl;
+				<< stack.back().back() << endl;
 #endif //NDEBUG
 		} else {
 			// literal, just a single word like ({hello})
@@ -403,14 +401,14 @@ Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 			ii = spec.find_first_of("() {}",ii);
 
 			string str = spec.substr(prev,ii-prev);
-			ostringstream oss;
+			std::ostringstream oss;
 			oss << "lit" << litc++ << endl;
 
 			// the inner vectors are just single until they get expanded
 			vector<string> tmp(1, str);
-			stack.back().emplace(strack.back().end(), MetaData(oss.str(), tmp));
+			stack.back().emplace(stack.back().end(), MetaData(oss.str(), tmp));
 #ifndef NDEBUG
-			cerr << "Literal" << str << " becomes " << stack.back().back()) 
+			cerr << "Literal" << str << " becomes " << stack.back().back() 
 				<< endl;
 #endif //NDEBUG
 		}
@@ -449,8 +447,6 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	cerr << "Initial Input Spec" << endl;
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
-		list<string> tmp;
-		list<string> tmp;
 		m_preinputs.push_back(*fnIt);
 		cerr << "\t" << *fnIt << endl;
 	}
@@ -458,7 +454,7 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	// expand multi-argument expressions, and remove the pre-expanded version
 	cerr << "Expanded Input Spec" << endl;
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-		argExpand(fit, preinputs);
+		argExpand(fit, m_preinputs);
 		cerr << "\t" << *fit << endl;
 	}
 
@@ -508,8 +504,6 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	cerr << "Initial Input Spec" << endl;
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
-		list<string> tmp;
-		list<string> tmp;
 		m_preinputs.push_back(*fnIt);
 		cerr << "\t" << *fnIt << endl;
 	}
@@ -519,14 +513,8 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	// expand multi-argument expressions, and remove the pre-expanded version
 	cerr << "Expanded Input Spec" << endl;
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-		argExpand(fit, preinputs);
+		argExpand(fit, m_preinputs);
 		cerr << "\t" << *fit << endl;
-	}
-
-	// split out output files, (but ignore commas inside {})
-	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
-				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
-		m_preoutputs.push_back(*fnIt);
 	}
 
 #ifndef NDEBUG
@@ -563,7 +551,7 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	m_visited = true;
 	
 	// push ourselves onto the call stack
-	stack.push_back(m_sid);
+	callstack.push_back(m_sid);
 
 	// perform expansion so that we resolve metadata without worrying about it
 	resolveExpandableGlobals();
@@ -571,31 +559,28 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	// merge in metadata from all dependencies 
 	int ret = mergeExternalMetadata(callstack);
 	if(ret < 0) {
-		cerr << "Error resolving inputs for " << it->second->m_sid << " from "
-			<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+		cerr << "Error resolving inputs for " << m_sid << " from "
+			<< m_sourcefile << ":" << m_line << endl;
 		return -1;
 	} else if (ret > 0) {
 		cerr << "Warning, cannot currently resolve inputs for " 
-			<< it->second->m_sid << " from "
-			<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
+			<< m_sid << " from " << m_sourcefile << ":" << m_line << endl;
 	}
 
 	// resolve all global varianble references, including 
 	// variables of variables of variables.... 
 	ret = resolveNonExpandableGlobals();
 	if(ret < 0) {
-		cerr << "Error resolving global variabes for " << it->second->m_sid 
-			<< " from " << it->second->m_sourcefile << ":" 
-			<< it->second->m_line << endl;
+		cerr << "Error resolving global variabes for " << m_sid 
+			<< " from " << m_sourcefile << ":" << m_line << endl;
 		return -1;
 	}
 
 	// sets all final inputs
 	ret = resolveInputs(callstack);
 	if(ret < 0) {
-		cerr << "Error resolving inputs for " << it->second->m_sid 
-			<< " from " << it->second->m_sourcefile << ":" 
-			<< it->second->m_line << endl;
+		cerr << "Error resolving inputs for " << m_sid 
+			<< " from " << m_sourcefile << ":" << m_line << endl;
 		return -1;
 	}
 
@@ -658,8 +643,8 @@ int Chain::Link::resolveExpandableGlobals()
 				}
 
 				restart = true;
-				fit = m_inputs.erase(fit);
-				splice(fit, inExp);
+				fit = m_preinputs.erase(fit);
+				m_preinputs.splice(fit, inExp);
 			}
 		}
 	}
@@ -675,7 +660,7 @@ int Chain::Link::resolveExpandableGlobals()
  *
  * @return error code
  */
-int Chain::Link::mergeExternalMetadata(list<string>& callstack, )
+int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 {
 #ifndef NDEBUG
 	cerr << "mergeExternalMetadata" << this << endl;
@@ -709,7 +694,7 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack, )
 				continue;
 			}
 			
-			if(!expIt->prefix().empty() || !expIt->suffix().empty()) {
+			if(!expIt->prefix().str().empty() || !expIt->suffix().str().empty()) {
 				cerr << "Parsing error. References to output of other "
 					"jobs cannot include literals. ie. /ifs/{1.2:3} is"
 					"not valid. Add /ifs to the parent job instead!" << endl;
@@ -725,11 +710,11 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack, )
 			}
 	
 			// make sure the inputs' metadta and outputs are up to date
-			linkit->resolveTree(callstack);
+			linkit->second.resolveTree(callstack);
 
 			//merge metadata
 			list<string> control;
-			if(csvToList(controlstr, control) != 0) 
+			if(csvToList((*expIt)[4].str(), control) != 0) 
 				return -1;
 
 			// split produces a version of the metadata where the 
@@ -737,13 +722,11 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack, )
 			
 			// array of list of rows that run together, for each output
 			// row, it gives the input rows that matched/were brought together
-			shared_ptr<Metadata> reduce = linkit->m_metadata.split(control, NULL);
-			if(m_metadata.merge(*reduce, NULL) < 0) {
+			shared_ptr<MetaData> reduce = linkit->second.m_metadata.split(control);
+			if(m_metadata.ujoin(*reduce) < 0) {
 				cerr << "Error resolving inputs/metadata" << endl;
 				return -1;
 			}
-
-			for(
 		}
 	}
 
@@ -771,8 +754,7 @@ Chain::Link::resolveNonExpandableGlobals()
 	if(m_resolved)
 		return 0;
 
-	assert(m_metadata.size() > 0);
-	assert(m_labels.size() == m_resolved.size());
+	assert(m_metadata.m_rows > 0);
 	list<std::string> inExp;
 	bool restart = false;
 
@@ -796,7 +778,7 @@ Chain::Link::resolveNonExpandableGlobals()
 #endif //NDEBUG
 
 				// ignore global variables that we have metadata for
-				auto mit = m_revlabels.find((*expIt)[2]);
+				auto mit = m_metadata.m_labels.find((*expIt)[TODO]);
 				if(mit != m_revlabels.end()) {
 					continue;
 				}
@@ -910,11 +892,11 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 
 				// contstruct a mapping between outmetadata and 
 				for(size_t jj=0; jj<m_metadata.m_rows; jj++) {
-					vector<int> vals(m_cols);
+					vector<string> vals(m_cols);
 					list<int> matchrows;
 					// fill pairs to search for variables in metadata
 					for(size_t kk=0; kk<m_metadata.m_cols; kk++) 
-						vals[kk]=m_metadata.geti(jj,kk);
+						vals[kk]=m_metadata.gets(jj,kk);
 
 					// search for matching metadata in source link
 					if(linkit->m_metadata.search(m_metadata.m_labels, vals, 

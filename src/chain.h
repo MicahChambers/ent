@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <map>
 
+#include "metadata.h"
+
 struct vintComp {
 	bool operator() (const std::vector<int>& lhs, const std::vector<int>& rhs) const
 	{
@@ -132,7 +134,7 @@ class Chain::Link
 			int outnum;
 			
 			// otherwise just store the filename
-			string filename;
+			std::string filename;
 		};
 
 		// J x A = jobs x (in/out) args
@@ -172,10 +174,13 @@ class Chain::Link
 		std::list<std::list<std::string>> m_postinputs;
 		std::list<std::list<std::string>> m_postoutputs;
 
-		const Chain* m_parent;
+		Chain* m_parent;
 		friend Chain;
 
 		int mixtureToMetadata(std::string spec, const Chain* parent);
 		int resolveInternal();
-
+		int resolveExpandableGlobals();
+		int mergeExternalMetadata(std::list<std::string>&);
+		int resolveNonExpandableGlobals();
+		int resolveInputs(std::list<std::string>&);
 };

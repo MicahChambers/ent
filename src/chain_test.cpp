@@ -31,7 +31,7 @@ int main(int argc, char** argv)
 	
 	Chain tree(filename);
 
-	tree.simulate();
+//	tree.simulate();
 	//cerr << tree << endl;
 
 	// done, catch all argument errors
