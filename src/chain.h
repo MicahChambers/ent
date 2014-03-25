@@ -167,6 +167,7 @@ class Chain::Link
 		// inputs and outputs before they have been mapped to particular 
 		// jobs/metadata, ie still has {var} values
 		std::list<std::string> m_preinputs;
+		std::list<InputT> m_refstorage;
 		std::list<std::string> m_preoutputs;
 		std::list<std::list<std::string>> m_postinputs;
 		std::list<std::list<std::string>> m_postoutputs;

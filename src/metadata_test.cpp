@@ -44,6 +44,11 @@ int main()
 	fmri.nest(mdsubjects);
 	cerr << fmri<< endl;
 
+	cerr << "Joining fmri:" << 
+	fmri.ujoin(longit);
+	cerr << fmri << endl;
+
+	cerr << "Joining twice:" << 
 	fmri.ujoin(longit);
 	cerr << fmri << endl;
 

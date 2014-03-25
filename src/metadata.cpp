@@ -8,7 +8,7 @@ using namespace std;
 
 #define VERYDEBUG
 
-vector<shared_ptr<MetaData>> MetaData::splitApart(const list<string>& control)
+shared_ptr<MetaData> MetaData::split(const list<string>& control)
 {
 	list<int> cols;
 	for(auto it=control.begin(); it!=control.end(); it++) {
@@ -111,114 +111,6 @@ vector<shared_ptr<MetaData>> MetaData::splitApart(const list<string>& control)
 	}
 
 	return out;
-}
-
-int MetaData::split(const list<string>& control)
-{
-	auto spl = splitApart(control);
-	return splitHelp(spl);
-}
-
-
-/**
- * @brief This is only intended to be used when the inputs all
- * have the same number of columns, and the inputs are aligned 
- * (like the output of split)
- *
- * @param in
- *
- * @return 
- */
-int MetaData::splitHelp(const vector<shared_ptr<MetaData>>& in)
-{
-	if(in.size() <= 0) 
-		return -1;
-
-	if(!in.back())
-		return -1;
-	
-	cerr << in.back() << endl;
-	m_cols = in.back()->m_cols;
-	m_rows = in.back()->m_rows;
-	for(size_t ii=0; ii<in.size(); ii++){
-		if(in[ii]->m_cols != m_cols) 
-			return -1;
-		if(in[ii]->m_rows != m_rows) 
-			return -1;
-	}
-
-	list<int> comcols;
-	for(size_t ii=0; ii<m_cols; ii++) {
-		comcols.push_back(ii);
-	}
-
-	// find the columns that are identical
-	for(size_t ii=1; ii<in.size(); ii++){
-		for(auto it=comcols.begin(); it!=comcols.end(); ) {
-			// compare col with metadata in previous split
-			bool common=true;
-
-			for(size_t jj=0; common && jj<in[ii]->m_rows; jj++){
-				if(in[ii-1]->geti(jj,*it) != in[ii]->geti(jj,*it))
-					common = false;
-			}
-			if(!common)
-				it=comcols.erase(it);
-			else
-				it++;
-		}
-	}
-
-	size_t incols = in.back()->m_cols;
-	m_cols = comcols.size()+(m_cols-comcols.size())*in.size();
-	m_rows = in.back()->m_rows;
-	m_lookup.resize(m_cols);
-	m_data.resize(m_cols*m_rows);
-	m_labels.resize(m_cols);
-	m_search.resize(m_cols);
-
-	cerr << "incols: " << incols << endl;
-	cerr << "m_cols: " << m_cols << endl;
-	cerr << "m_rows: " << m_rows<< endl;
-
-	// for each column in the input
-	for(size_t cc=0,ci=0; cc<m_cols && ci<incols; ci++){
-		cerr << cc << "," << ci << endl;
-		// if col ci is in the common cols
-		if(std::find(comcols.begin(), comcols.end(), ci)!=comcols.end()) {
-			cerr << "common" << endl;
-			m_lookup[cc] = (*in.back()).m_lookup[ci];
-			m_labels[cc] = (*in.back()).m_labels[ci];
-			for(size_t rr=0; rr<m_rows; rr++) {
-				m_data[rr*m_cols+cc]=in.back()->m_data[rr*incols+ci];
-			}
-
-			cc++;
-		} else {
-			// have to copy multiple times, once for each in
-			for(size_t ii=0; ii<in.size(); ii++){
-				cerr << ci << "(" << ii<<")->" << cc << endl;
-				m_lookup[cc] = in[ii]->m_lookup[ci];
-				std::ostringstream oss;
-				oss << in[ii]->m_labels[ci] << "|" << ii;
-				m_labels[cc] = oss.str();
-				for(size_t rr=0; rr<m_rows; rr++) {
-					m_data[rr*m_cols+cc]=in[ii]->m_data[rr*incols+ci];
-				}
-				cc++;
-			}
-		}
-	}
-	
-	// set up search
-	for(unsigned int cc=0 ; cc<m_cols; cc++) {
-		m_search[cc].clear();
-		for(unsigned int rr=0 ; rr<m_rows; rr++) {
-			m_search[cc][geti(rr,cc)].push_back(rr);
-		}
-	}
-
-	return 0;
 }
 
 int MetaData::ujoin(MetaData& rhs)
