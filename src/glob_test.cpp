@@ -6,6 +6,8 @@
 #include <set>
 #include <tclap/CmdLine.h>
 
+#include "version.h"
+
 #ifdef __unix__
 #include <sys/types.h>
 #include <dirent.h>

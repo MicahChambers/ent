@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "chain.h"
+#include "version.h"
 
 using std::endl;
 using std::cerr;

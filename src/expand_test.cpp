@@ -6,6 +6,8 @@
 #include <set>
 #include <tclap/CmdLine.h>
 
+#include "version.h"
+
 using std::list;
 using std::cerr;
 using std::cout;

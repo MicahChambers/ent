@@ -1117,7 +1117,8 @@ Chain::parseFile(string filename)
 					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
 				return -1 ;
 			} else if(prevleaf.empty()) {
-				prevleaf = getId(args[1]);
+				curleaf = getId(args[1].str());
+				prevleaf = getId(args[1].str());
 			} else if(args[1].str().empty()) {
 				curleaf = prevleaf;
 				curleaf.back()++;
