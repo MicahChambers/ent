@@ -11,11 +11,11 @@ def configure(conf):
     join = os.path.join
     isabs = os.path.isabs
     abspath = os.path.abspath
+    env = conf.env
+    conf.env.CXX='clang'
 
     opts = vars(conf.options)
     conf.load('compiler_cxx')
-
-    env = conf.env
 
     ############################### 
     # Basic Compiler Configuration
