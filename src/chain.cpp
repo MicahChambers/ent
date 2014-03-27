@@ -711,12 +711,14 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			if((*expIt)[3].str().empty())
 				depnum = m_prevLink;
 			else
-				depnum = (*expIt)[3].str().empty();
+				depnum = (*expIt)[3].str();
 
-			cerr << depnum << endl;
 			auto linkit = m_parent->m_links.find(getId(depnum));
 			if(linkit != m_parent->m_links.end()) {
 				cerr << "External Reference Var! (" << depnum << ")" << endl;
+			} else {
+				cerr << "Unknown variable: " << (*expIt)[0] << endl;
+				return -1;
 			}
 	
 			// make sure the inputs' metadta and outputs are up to date
@@ -1084,6 +1086,7 @@ Chain::parseFile(string filename)
 				return -1 ;
 			} else if(prevleaf.empty()) {
 				prevleaf = getId(args[1]);
+				curleaf = getId(args[1]);
 			} else if(args[1].str().empty()) {
 				curleaf = prevleaf;
 				curleaf.back()++;
