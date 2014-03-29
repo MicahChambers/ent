@@ -12,7 +12,8 @@ def configure(conf):
     isabs = os.path.isabs
     abspath = os.path.abspath
     env = conf.env
-    conf.env.CXX='clang'
+    conf.env.CXX='clang++'
+    conf.env.CC='clang'
 
     opts = vars(conf.options)
     conf.load('compiler_cxx')

@@ -23,6 +23,7 @@ using std::list;
 using std::pair;
 using std::vector;
 
+#define VERBOSE
 
 // 1 = expansion *
 // 2 = everything inside except * 
@@ -103,11 +104,13 @@ void printCC(const C& in)
 int csvToList(string in, list<string>& csv)
 {
 	const sregex_token_iterator tokEnd;
-	regex commaRe(",(?![^{]*\\})");
+	regex commaRe("\\s*,\\s*(?![^{]*\\})\\s*");
 	csv.clear();
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
 	for(; regIt != tokEnd ; ++regIt) {
-		csv.push_back(*regIt);
+		if(regIt->length() > 0) {
+			csv.push_back(*regIt);
+		}
 	}
 	return 0;
 }
@@ -115,7 +118,7 @@ int csvToList(string in, list<string>& csv)
 int csvToList(string in, list<int>& csv)
 {
 	const sregex_token_iterator tokEnd;
-	regex commaRe(",(?![^{]*\\})");
+	regex commaRe("\\s*,\\s*(?![^{]*\\})\\s*");
 	csv.clear();
 	sregex_token_iterator regIt(in.cbegin(), in.cend(), commaRe, -1);
 	for(; regIt != tokEnd ; ++regIt) {
@@ -123,6 +126,7 @@ int csvToList(string in, list<int>& csv)
 			if(v > '9' || v < '0')
 				return -1;
 		}
+		cerr << "pushing" << regIt->str() << endl;
 		csv.push_back(atoi(regIt->str().c_str()));
 	}
 	return 0;
@@ -262,11 +266,23 @@ vector<vector<string>> nest(const vector<vector<string>>& a,
 	return out;
 }
 
-	int
+
+void 
+Chain::Link::write(string str)
+{
+	cerr << m_id << ": " << str;
+}
+
+
+int
 Chain::Link::mixtureToMetadata(string spec, const Chain* parent)
 {
+	// although we don't require () in the input file, it makes it 
+	// easier to parse if we have parenthesis, instead of adding 
+	// the ) exit to the end of the function
+	spec = "(" + spec + ")";
 #ifndef NDEBUG
-	cerr << "Metavar: " << spec << endl;
+	write("Metavar: " + spec + "\n");
 #endif//NDEBUG
 	string tmp = spec;
 
@@ -426,9 +442,12 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		std::string sid, std::string defsource, 
 		std::string inspec, std::string outspec, std::string cmd, 
 		Chain* parent)
-: m_cmd(cmd), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
-	m_sid(getSid(m_id)), m_type(PROC), m_prevLink(defsource), m_parent(parent)
+: m_cmd(cmd), m_sourcefile(sourcefile), m_line(line), 
+	m_id(sid), m_type(PROC), m_prevLink(defsource), m_parent(parent)
 {
+#ifndef NDEBUG
+	cerr << "m_prevlink " << m_prevLink << endl;
+#endif //NDEBUG
 	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
 	const sregex_token_iterator tokEnd;
 
@@ -442,18 +461,27 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	m_preoutputs.clear();
 
 	// split out input files, (but ignore commas inside {})
+#ifndef NDEBUG
 	cerr << "Initial Input Spec" << endl;
+#endif //NDEBUG
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
 		m_preinputs.push_back(*fnIt);
+#ifndef NDEBUG
 		cerr << "\t" << *fnIt << endl;
+#endif //NDEBUG
 	}
 
 	// expand multi-argument expressions, and remove the pre-expanded version
+	// TODO should do this later
+#ifndef NDEBUG
 	cerr << "Expanded Input Spec" << endl;
+#endif //NDEBUG
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 		argExpand(fit, m_preinputs);
+#ifndef NDEBUG
 		cerr << "\t" << *fit << endl;
+#endif
 	}
 
 	// split out output files, (but ignore commas inside {})
@@ -463,9 +491,14 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	}
 
 #ifndef NDEBUG
-	cerr << "Command: " << cmd<< endl;
+	cerr << "Source file: " << m_sourcefile << endl;
+	cerr << "ID: " << m_id << endl;
+	cerr << "Line: " << m_line << endl;
+	cerr << "Command: " << m_cmd << endl;
+	cerr << "Default Source: " << m_prevLink << endl;
 	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
 	cerr << "Output:  "; printC(m_preoutputs); cerr << endl;
+	cerr << "Metadata Expansion:  " << m_metadata << endl;
 #endif //NDEBUG
 
 }
@@ -476,10 +509,13 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		std::string sid, std::string defsource, 
 		std::string inspec, std::string mixture,
 		Chain* parent)
-		: m_cmd(""), m_sourcefile(sourcefile), m_line(line), m_id(getId(sid)), 
-		m_sid(getSid(m_id)), m_type(INPUT), m_prevLink(defsource), m_parent(parent)
+		: m_cmd(""), m_sourcefile(sourcefile), m_line(line), m_id(sid), 
+		m_type(INPUT), m_prevLink(defsource), m_parent(parent)
 
 {
+#ifndef NDEBUG
+	cerr << "m_prevlink " << m_prevLink << endl;
+#endif//ifndef NDEBUG
 	const auto commaRe = regex("\\s*,(?![^{]*\\})\\s*");
 	const sregex_token_iterator tokEnd;
 
@@ -499,23 +535,36 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 	}
 	
 	// split out input files, (but ignore commas inside {})
+#ifndef NDEBUG
 	cerr << "Initial Input Spec" << endl;
+#endif//ifndef NDEBUG
 	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
 				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
 		m_preinputs.push_back(*fnIt);
+#ifndef NDEBUG
 		cerr << "\t" << *fnIt << endl;
+#endif//ifndef NDEBUG
 	}
 
 	// TODO move this further down the pipeline, so that people 
 	// can enter non-definite lengths {:10-}
 	// expand multi-argument expressions, and remove the pre-expanded version
+#ifndef NDEBUG
 	cerr << "Expanded Input Spec" << endl;
+#endif//ifndef NDEBUG
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
 		argExpand(fit, m_preinputs);
+#ifndef NDEBUG
 		cerr << "\t" << *fit << endl;
+#endif//ifndef NDEBUG
 	}
 
 #ifndef NDEBUG
+	cerr << "Source file: " << m_sourcefile << endl;
+	cerr << "ID: " << m_id << endl;
+	cerr << "Line: " << m_line << endl;
+	cerr << "Command: " << m_cmd << endl;
+	cerr << "Default Source: " << m_prevLink << endl;
 	cerr << "Inspec:  "; printC(m_preinputs); cerr << endl;
 	cerr << "Metadata Expansion:  " << m_metadata << endl;
 #endif //NDEBUG
@@ -541,7 +590,7 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	}
 
 #ifndef NDEBUG
-	cerr << "resolveTree " << this << endl;
+	write("resolveTree\n");
 #endif //NDEBUG
 
 	if(m_visited) {
@@ -551,42 +600,41 @@ int Chain::Link::resolveTree(list<string>& callstack)
 	m_visited = true;
 	
 	// push ourselves onto the call stack
-	callstack.push_back(m_sid);
+	callstack.push_back(m_id);
 
 	// perform expansion so that we resolve metadata without worrying about it
-//	resolveExpandableGlobals();
+	resolveExpandableGlobals();
 
 	// merge in metadata from all dependencies 
 	int ret = mergeExternalMetadata(callstack);
 	if(ret < 0) {
-		cerr << "Error resolving inputs for " << m_sid << " from "
-			<< m_sourcefile << ":" << m_line << endl;
+		write("Error resolving inputs from \n");
 		return -1;
 	} else if (ret > 0) {
-		cerr << "Warning, cannot currently resolve inputs for " 
-			<< m_sid << " from " << m_sourcefile << ":" << m_line << endl;
+		write("Warning, cannot currently resolve inputs\n");
 	}
 // TODO really only the metadata matters because it is what
 // we need to determine how many processes run. Everything else
 // can be done right before running
 //
-//	// resolve all global varianble references, including 
-//	// variables of variables of variables.... 
-//	ret = resolveNonExpandableGlobals();
-//	if(ret < 0) {
-//		cerr << "Error resolving global variabes for " << m_sid 
-//			<< " from " << m_sourcefile << ":" << m_line << endl;
-//		return -1;
-//	}
-//
-//	// sets all final inputs
-//	ret = resolveInputs(callstack);
-//	if(ret < 0) {
-//		cerr << "Error resolving inputs for " << m_sid 
-//			<< " from " << m_sourcefile << ":" << m_line << endl;
-//		return -1;
-//	}
+	// resolve all global varianble references, including 
+	// variables of variables of variables.... 
+	ret = resolveNonExpandableGlobals();
+	if(ret < 0) {
+		cerr << "Error resolving global variabes for " << m_id 
+			<< " from " << m_sourcefile << ":" << m_line << endl;
+		return -1;
+	}
 
+	// sets all final inputs
+	ret = resolveInputs(callstack);
+	if(ret < 0) {
+		cerr << "Error resolving inputs for " << m_id 
+			<< " from " << m_sourcefile << ":" << m_line << endl;
+		return -1;
+	}
+
+	write("RESOLVED!\n");
 	m_resolved = true;
 	return 0;
 }
@@ -601,16 +649,19 @@ int Chain::Link::resolveTree(list<string>& callstack)
  */
 int Chain::Link::resolveExpandableGlobals()
 {
-	cerr << "resolveExpandableGlobals" << this << endl;
+	write("resolveExpandableGlobals\n");
 	
 	if(m_resolved)
 		return 0;
 	
 	std::smatch args;
 	list<std::string> inExp;
-	bool restart = false;
 
-	while(!restart) {
+	// If we expand a variable, we need to go back to the very beginning
+	bool restart = true;
+	while(restart) {
+		restart = false;
+
 		// for input term
 		for(auto fit = m_preinputs.begin(); !restart && 
 						fit != m_preinputs.end(); fit++) {
@@ -636,8 +687,9 @@ int Chain::Link::resolveExpandableGlobals()
 				cerr << "Expanding: " << (*expIt)[0].str() << " in " 
 					<< *fit << endl;
 #endif //NDEBUG
-				for(auto lit = git->second.begin(); 
-						lit != git->second.begin(); lit++) {
+				cerr << git->first << endl;
+				for(auto lit = git->second.begin(); lit != git->second.end(); 
+								lit++) {
 					string expanded = prefix + *lit + suffix;
 #ifndef NDEBUG
 					cerr << "\t" << expanded << endl; 
@@ -647,6 +699,7 @@ int Chain::Link::resolveExpandableGlobals()
 
 				restart = true;
 				fit = m_preinputs.erase(fit);
+
 				m_preinputs.splice(fit, inExp);
 			}
 		}
@@ -666,9 +719,9 @@ int Chain::Link::resolveExpandableGlobals()
 int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 {
 #ifndef NDEBUG
-	cerr << "mergeExternalMetadata" << this << endl;
-	cerr << m_cmd << endl; 
-	cerr << "Initial Metadata:\n" << m_metadata << endl; 
+	write("mergeExternalMetadata");
+	write("Initial Metadata:\n");
+	cerr << m_metadata << endl; 
 #endif //NDEBUG
 	
 	if(m_resolved)
@@ -678,7 +731,9 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 
 	// resolve inputs
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
+#ifndef NDEBUG
 		cerr << "Input spec: " << *fit << endl;
+#endif//ifndef NDEBUG
 		std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
 		for(; expIt != ReEnd; ++expIt) {
 			
@@ -687,23 +742,22 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			cerr << "Match " << (*expIt)[0].str() << endl;
 			cerr << "Expand?" << (*expIt)[1].str() << endl;
 			cerr << "Variable : " << (*expIt)[2].str() << endl;
-			cerr << "Dep Number: " << (*expIt)[3].str() << endl;
+			cerr << "Dep Number:\"" << (*expIt)[3].str() << '"'<< endl;
 			cerr << "Var/Number: " << (*expIt)[4].str() << endl;
 			cerr << "Control: " << (*expIt)[5].str() << endl;
 			cerr << "Suffix " << expIt->suffix().str() << endl;
-#endif //NDEBUG
+#endif//ifndef NDEBUG
 
 			// ignore global variables for now 
 			auto gvalit = m_parent->m_vars.find((*expIt)[2]);
 			if(gvalit != m_parent->m_vars.end()) {
-				cerr << "Global Var!" << endl;
 				continue;
 			}
 			
 			if(!expIt->prefix().str().empty() || !expIt->suffix().str().empty()) {
-				cerr << "Parsing error. References to output of other "
+				write("Parsing error. References to output of other "
 					"jobs cannot include literals. ie. /ifs/{1.2:3} is"
-					"not valid. Add /ifs to the parent job instead!" << endl;
+					"not valid. Add /ifs to the parent job instead!\n");
 				return -1;
 			}
 
@@ -711,12 +765,22 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			if((*expIt)[3].str().empty())
 				depnum = m_prevLink;
 			else
-				depnum = (*expIt)[3].str().empty();
+				depnum = (*expIt)[3].str();
 
-			cerr << depnum << endl;
-			auto linkit = m_parent->m_links.find(getId(depnum));
+			cerr << '"' << depnum << '"' << endl;
+			auto linkit = m_parent->m_links.find(depnum);
 			if(linkit != m_parent->m_links.end()) {
-				cerr << "External Reference Var! (" << depnum << ")" << endl;
+#ifndef NDEBUG
+				write("External Reference Var! (" + depnum + ")\n");
+#endif//ifndef NDEBUG
+			} else {
+#ifndef NDEBUG
+				for(auto vv:m_parent->m_links) {
+					write("\"" + vv.first + '"' );
+				}
+				write("Not External Reference, nothing to merge\n");
+#endif //NDEBUG
+				continue;
 			}
 	
 			// make sure the inputs' metadta and outputs are up to date
@@ -724,7 +788,7 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 
 			//merge metadata
 			list<string> control;
-			if(csvToList((*expIt)[4].str(), control) != 0) 
+			if(csvToList((*expIt)[5].str(), control) != 0) 
 				return -1;
 
 			// split produces a version of the metadata where the 
@@ -734,14 +798,14 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			// row, it gives the input rows that matched/were brought together
 			auto reduce = linkit->second->m_metadata.split(control);
 			if(m_metadata.ujoin(*reduce) < 0) {
-				cerr << "Error resolving inputs/metadata" << endl;
+				write("Error resolving inputs/metadata\n");
 				return -1;
 			}
 		}
 	}
 	
 #ifndef NDEBUG
-	cerr << "Final Metadata:\n" << m_metadata << endl; 
+	write("Final Metadata:\n");
 	cerr << m_metadata << endl;
 #endif //NDEBUG
 	return 0;
@@ -761,8 +825,9 @@ Chain::Link::resolveNonExpandableGlobals()
 	std::smatch args;
 
 #ifndef NDEBUG
-		cerr << "resolveNonExpandableGlobals" << endl;
+		write("resolveNonExpandableGlobals\n");
 		printC(m_preinputs);
+		cerr << endl;
 #endif //NDEBUG
 	
 	if(m_resolved)
@@ -770,16 +835,18 @@ Chain::Link::resolveNonExpandableGlobals()
 
 	assert(m_metadata.m_rows > 0);
 	list<std::string> inExp;
-	bool restart = false;
+	bool restart = true;
 
-	while(!restart) {
+	while(restart) {
+		restart = false;
+
 		// for input term
 		for(auto fit = m_preinputs.begin(); !restart && 
 						fit != m_preinputs.end(); fit++) {
 
 			// for each variable like "{subject}" in {subject}/{run}
 			std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
-			for(; expIt != ReEnd ; ++expIt) {
+			for(; !restart && expIt != ReEnd ; ++expIt) {
 
 #ifndef NDEBUG
 			cerr << "Prefix " << expIt->prefix().str() << endl;
@@ -854,8 +921,9 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 	std::smatch match;
 
 #ifndef NDEBUG
-	cerr << "resolveInputs" << this << endl;
+	write("resolveInputs");
 	printC(m_preinputs);
+	cerr << endl;
 #endif //NDEBUG
 	
 	if(m_resolved)
@@ -899,10 +967,19 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 					m_inputs[jj].push_back(InputT(m_metadata.gets(col, jj)));
 				}
 			} else { 
-				// it is a reference, find the referenced link
-				auto linkit = m_parent->m_links.find(getId(match[3]));
+				string depnum;
+				if(match[3].str().empty())
+					depnum = m_prevLink;
+				else
+					depnum = match[3].str();
+				auto linkit = m_parent->m_links.find(depnum);
 				if(linkit != m_parent->m_links.end()) {
+#ifndef NDEBUG
 					cerr << "External Reference Var!" << endl;
+#endif//ifndef NDEBUG
+				} else {
+					cerr << "Not sure what " << match[0] << " is " << endl;
+					return -1;
 				}
 				linkit->second->resolveTree(callstack);
 
@@ -930,6 +1007,7 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 						tmp.outnum = argnum;
 						tmp.procnum = *it;
 						tmp.source = linkit->second;
+						m_inputs[jj].push_back(tmp);
 					}
 				}
 			}
@@ -940,7 +1018,7 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 				oss.str("");
 				std::sregex_iterator expIt(fit->cbegin(), fit->cend(), CurlyRe);
 				for(; expIt != ReEnd ; ++expIt) {
-					string varname = match[2].str(); 
+					string varname = (*expIt)[2].str(); 
 					auto lvalit = std::find(m_metadata.m_labels.begin(),
 							m_metadata.m_labels.end(), varname);
 					if(lvalit == m_metadata.m_labels.end()) {
@@ -963,7 +1041,9 @@ int Chain::Link::resolveInputs(list<string>& callstack)
 				}
 
 				oss << suffix;
+#ifndef NDEBUG
 				cerr << "\t" << oss.str() << endl;
+#endif//ifndef NDEBUG
 				m_inputs[jj].push_back(InputT(oss.str()));
 			}
 		}
@@ -991,7 +1071,9 @@ Chain::Link::run()
 int
 Chain::parseFile(string filename) 
 {
+#ifndef NDEBUG
 	cerr << "Parsing: " << endl;
+#endif//ifndef NDEBUG
 	std::string idstR = "\\s*([0-9.]*)\\s*:";			// id string regex
 	std::string arstR = "\\s*\\[([^\\]\\s]*)\\]\\s*"; 	// array string regex
 	std::string nonwR = "\\s*([^\\s]+)\\s*"; 			// non-white regex
@@ -1006,8 +1088,8 @@ Chain::parseFile(string filename)
 	const sregex_token_iterator tokEnd;
 	std::smatch args;
 
-	vector<int> prevleaf;
-	vector<int> curleaf; 
+	string prevleaf;
+	string curleaf; 
 
 	string linebuff; // contains the complete line (in case of line ending with ...)
 	string line;
@@ -1054,7 +1136,8 @@ Chain::parseFile(string filename)
 				cerr << "Warning: redeclaration of " << varname << " in " 
 					<< filename << ":" << linenum << endl;
 				cerr << varname << "=" << value << endl;
-				cerr << "Value will NOT be updated!" << endl;
+				cerr << "Old value will be removed!" << endl;
+				ret.first->second.clear();
 			}
 
 			// Split comma separated values into tokens
@@ -1075,33 +1158,38 @@ Chain::parseFile(string filename)
 			cerr << line << endl;
 			cerr << "---------------------------------------" << endl;
 #endif //NDEBUG
+			curleaf = args[1].str();
 
 			/* Handle default ID from prevleaf, or, if this is the first line
 			 * then just set previous to current*/
-			if(args[1].str().empty() && prevleaf.empty()) {
+			if(curleaf.empty() && prevleaf.empty()) {
 				cerr << "Error, first Link MUST have a identifier: "
 					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
 				return -1 ;
 			} else if(prevleaf.empty()) {
-				prevleaf = getId(args[1]);
-			} else if(args[1].str().empty()) {
-				curleaf = prevleaf;
-				curleaf.back()++;
-			} else {
-				curleaf = getId(args[1].str());
+				prevleaf = args[1].str();
+			} else if(curleaf.empty()) {
+				auto tmp = getId(prevleaf);
+				tmp.back()++;
+				curleaf = getSid(tmp);
 			}
 
+#ifndef NDEBUG
+			cerr << '"' << curleaf << '"' << endl;
+			cerr << '"' << prevleaf << '"' << endl;
+#endif//ifndef NDEBUG
 			/* create new data structure */
 			auto newleaf = new Link(filename, linenum, 
-						getSid(curleaf), getSid(prevleaf), 
-						args[2], args[3], this);
+						curleaf, prevleaf, args[2], args[3], this);
 
 			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
-				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
+				cerr << "Error: redeclaration of " << newleaf->m_id << " in " 
 					<< filename << ":" << linenum << endl;
 				return -1;
 			}
+
+			prevleaf = curleaf;
 		} else if(regex_match(line, args, cmdRe)) {
 #ifndef NDEBUG
 			cerr << "---------------------------------------" << endl;
@@ -1109,6 +1197,7 @@ Chain::parseFile(string filename)
 			cerr << line << endl;
 			cerr << "---------------------------------------" << endl;
 #endif //NDEBUG
+			curleaf = args[1].str();
 
 			/* Handle default ID from prevleaf, or, if this is the first line
 			 * then just set previous to current*/
@@ -1117,25 +1206,29 @@ Chain::parseFile(string filename)
 					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
 				return -1 ;
 			} else if(prevleaf.empty()) {
-				prevleaf = getId(args[1]);
+				prevleaf = args[1];
 			} else if(args[1].str().empty()) {
-				curleaf = prevleaf;
-				curleaf.back()++;
-			} else {
-				curleaf = getId(args[1].str());
+				auto tmp = getId(prevleaf);
+				tmp.back()++;
+				curleaf = getSid(tmp);
 			}
 
 			/* create new data structure */
+#ifndef NDEBUG
+			cerr << '"' << curleaf << '"' << endl;
+			cerr << '"' << prevleaf << '"' << endl;
+#endif//ifndef NDEBUG
 			auto newleaf = new Link(filename, linenum, 
-						getSid(curleaf), getSid(prevleaf), 
-						args[2], args[3], args[4], this);
+						curleaf, prevleaf, args[2], args[3], args[4], this);
 
 			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
-				cerr << "Error: redeclaration of " << newleaf->m_sid << " in " 
+				cerr << "Error: redeclaration of " << newleaf->m_id << " in " 
 					<< filename << ":" << linenum << endl;
 				return -1;
 			}
+
+			prevleaf = curleaf;
 		}
 
 		line = "";
@@ -1172,17 +1265,41 @@ Chain::Chain(string filename) : m_err(0)
 	resolveTree();
 }
 
+void Chain::dumpgraph()
+{
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+		cerr << "ID: " << it->first << endl;
+		
+		auto iij=it->second->m_inputs.begin();
+		for(size_t jj=0; iij!=it->second->m_inputs.end(); jj++,iij++) {
+			cerr << "\t" << "Job#: " << jj << endl;
+
+			auto iia = iij->begin();
+			for(size_t aa=0; iia != iij->end(); iia++, aa++) {
+				if(iia->source) {
+					cerr << "\t\tFrom Output:" << iia->source->m_id 
+						<< ", Arg: " << iia->outnum 
+						<< ", Job: " << iia->procnum << endl;
+				} else {
+					cerr << "\t\tFile:" << iia->filename << endl;
+				}
+			}
+		}
+	}
+}
+
 int Chain::resolveTree()
 {
-	list<string> stack;
+	// prepare for traversal
 	for(auto it = m_links.begin(); it != m_links.end(); it++) {
-
-		// prepare for traversal
 		for(auto vv : m_links) {
 			vv.second->m_visited = false;
 			vv.second->m_resolved = false;
 		}
+	}
 
+	list<string> stack;
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
 		// stack is just for debugging purposes of the user
 		stack.clear();
 
@@ -1190,7 +1307,7 @@ int Chain::resolveTree()
 		// by resolving parents references. Fails if a cycles is
 		// detected. (ie traversal tries to revisit a node)
 		if(it->second->resolveTree(stack) != 0) {
-			cerr << "Error resolving inputs for " << it->second->m_sid << " from "
+			cerr << "Error resolving inputs for " << it->second->m_id << " from "
 				<< it->second->m_sourcefile << ":" << it->second->m_line << endl;
 			m_err = -1;
 
@@ -1203,5 +1320,6 @@ int Chain::resolveTree()
 		}
 	}
 
+	dumpgraph();
 	return 0;
 }

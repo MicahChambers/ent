@@ -22,12 +22,17 @@
 #	flirt -in fsubj1 -ref fsubj2 -out fsubj1_in_fsubj2 -tfm trans.mat
 #
 #note wildcard should resolve to a single input
+#
 base=/datadir
 prefix  =   {base}/{subject}/pipe
+
+# arrays of metadata may be produced with commas:
 subject=10107,10343,1
 fmri=fmri_year1,fmri_year2
 dti=dti_year1,dti_year2
-prefix=//{base}/{subject}/pipe
+
+#redeclaration generates a warning
+prefix={base}/{subject}/pipe
 
 # Types of lines:
 #
