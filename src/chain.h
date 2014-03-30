@@ -57,10 +57,11 @@ public:
 	class Link;
 	
 	int resolveTree();
+	void dumpgraph();
 
 private:
-	std::map<std::vector<int>,Link*, vintComp> m_links;
-	std::map<std::string,std::list<std::string>> m_vars;
+	std::unordered_map<std::string, Link*> m_links;
+	std::unordered_map<std::string, std::list<std::string>> m_vars;
 
 //	std::vector<int> getId(std::string);
 	int m_err;
@@ -100,8 +101,7 @@ class Chain::Link
 		// basic info
 		const std::string m_sourcefile;
 		const unsigned int m_line;
-		const std::vector<int> m_id;
-		const std::string m_sid;
+		const std::string m_id;
 		const NodeType m_type;
 		const std::string m_prevLink;
 		
@@ -113,8 +113,11 @@ class Chain::Link
 
 		int run();
 
+		void dumpgraph();
 
 	protected:
+
+		void write(std::string);
 
 		struct InputT
 		{

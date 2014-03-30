@@ -136,6 +136,12 @@ int MetaData::search(vector<string> vars, vector<string> vals, list<int>* out)
 
 shared_ptr<MetaData> MetaData::split(const list<string>& control)
 {
+	if(control.empty()) {
+		shared_ptr<MetaData> tmp(new MetaData);
+		*tmp = *this;
+		return tmp;
+	}
+
 	// resolve column names to column numbers
 	list<int> cols;
 	for(auto it=control.begin(); it!=control.end(); it++) {
