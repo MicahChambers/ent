@@ -58,6 +58,9 @@ public:
 	
 	int resolveTree();
 	void dumpgraph();
+	void buildCommands();
+
+	std::string m_outdir;
 
 private:
 	std::unordered_map<std::string, Link*> m_links;
@@ -186,4 +189,5 @@ class Chain::Link
 		int mergeExternalMetadata(std::list<std::string>&);
 		int resolveNonExpandableGlobals();
 		int resolveInputs(std::list<std::string>&);
+		int nameOutputs();
 };
