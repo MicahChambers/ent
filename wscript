@@ -86,6 +86,8 @@ def gitversion():
     return mastertxt
 
 def build(bld):
-    bld.env.DEFINES.append('__version__="%s"' % gitversion())
+    with open("src/version.h", "w") as f:
+        f.write('#define __version__ "%s"\n\n' % gitversion())
+        f.close()
 
     bld.recurse('src')

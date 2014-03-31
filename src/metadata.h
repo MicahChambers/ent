@@ -100,6 +100,21 @@ public:
 		return m_lookup[cc][m_data[rr*m_cols+cc]];
 	}
 	
+	std::string finds(size_t rr, std::string colname) {
+		if(rr > m_rows) {
+			std::cerr << "Invalid row given: " << rr << " (max: " << m_rows 
+				<< ")" << std::endl;
+			return "";
+		}
+
+		for(size_t cc=0; cc<m_labels.size(); cc++) {
+			if(m_labels[cc] == colname) {
+				return gets(rr, cc);
+			}
+		}
+		return "";
+	}
+	
 	friend std::ostream& operator<<(std::ostream& os, const MetaData& md);
 
 private:

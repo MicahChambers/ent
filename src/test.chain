@@ -34,6 +34,7 @@ dti=dti_year1,dti_year2
 #redeclaration generates a warning
 prefix={base}/{subject}/pipe
 
+OUTDIR={base}/{subject}/{dti}/{fmri}/
 # Types of lines:
 #
 # Variable (possibly array) declaration (use ',' for an array):

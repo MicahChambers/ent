@@ -1,8 +1,8 @@
-#include <tclap/CmdLine.h>
-#include <string>
+#include <tclap/CmdLine.h> #include <string>
 #include <iostream>
 
 #include "chain.h"
+#include "version.h"
 
 using std::endl;
 using std::cerr;
@@ -31,6 +31,7 @@ int main(int argc, char** argv)
 	
 	Chain tree(filename);
 
+	tree.buildCommands();
 //	tree.simulate();
 	//cerr << tree << endl;
 

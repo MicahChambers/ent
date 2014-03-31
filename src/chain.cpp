@@ -17,6 +17,7 @@ using std::ifstream;
 using std::regex;
 using std::regex_match;
 using std::sregex_token_iterator;
+using std::sregex_iterator;
 
 using std::map;
 using std::list;
@@ -70,6 +71,14 @@ string getSid(vector<int> in)
 	}
 
 	return oss.str();
+}
+
+string basename(string val)
+{
+	std::smatch match;
+	std::regex pattern("([^/]*)(?!.*/)");
+	std::regex_search(val, match, pattern);
+	return match[1].str();
 }
 
 template <typename C>
@@ -472,17 +481,18 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 #endif //NDEBUG
 	}
 
-	// expand multi-argument expressions, and remove the pre-expanded version
-	// TODO should do this later
-#ifndef NDEBUG
-	cerr << "Expanded Input Spec" << endl;
-#endif //NDEBUG
-	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-		argExpand(fit, m_preinputs);
-#ifndef NDEBUG
-		cerr << "\t" << *fit << endl;
-#endif
-	}
+//	// TODO move this further down the pipeline, so that people 
+//	// can enter non-definite lengths {:10-}
+//	// expand multi-argument expressions, and remove the pre-expanded version
+//#ifndef NDEBUG
+//	cerr << "Expanded Input Spec" << endl;
+//#endif //NDEBUG
+//	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
+//		argExpand(fit, m_preinputs);
+//#ifndef NDEBUG
+//		cerr << "\t" << *fit << endl;
+//#endif
+//	}
 
 	// split out output files, (but ignore commas inside {})
 	for(sregex_token_iterator fnIt(outspec.cbegin(), outspec.cend(), 
@@ -534,28 +544,40 @@ Chain::Link::Link(std::string sourcefile, unsigned int line,
 		return;
 	}
 	
+	// 
 	// split out input files, (but ignore commas inside {})
 #ifndef NDEBUG
 	cerr << "Initial Input Spec" << endl;
 #endif//ifndef NDEBUG
-	for(sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), 
-				commaRe, -1); fnIt != tokEnd ; ++fnIt) {
+	sregex_token_iterator fnIt(inspec.cbegin(), inspec.cend(), commaRe, -1);
+	for(; fnIt != tokEnd ; ++fnIt) {
+//		sregex_iterator expIt(fnIt->str().cbegin(), fnIt->str().cend(), CurlyRe);
+//		for(; expIt !=  ReEnd; expIt++) {
+//			auto varname = (*expIt)[2].str();
+//			auto fit = m_parent->m_vars.find(varname);
+//			if(fit == m_parent->m_vars.end()) {
+//				cerr << "Error, unknown variable " << varname << " referenced "
+//					"in input " << m_id << ". Input specs cannot reference "
+//					"variables from other processes. " << sourcefile << ":" 
+//					<< line << endl;
+//				m_err = -1;
+//				return;
+//			}
+//		}
 		m_preinputs.push_back(*fnIt);
 #ifndef NDEBUG
 		cerr << "\t" << *fnIt << endl;
 #endif//ifndef NDEBUG
 	}
 
-	// TODO move this further down the pipeline, so that people 
-	// can enter non-definite lengths {:10-}
-	// expand multi-argument expressions, and remove the pre-expanded version
+	// make preoutputs equal to preinputs basename
 #ifndef NDEBUG
-	cerr << "Expanded Input Spec" << endl;
-#endif//ifndef NDEBUG
+	cerr << "Preoutputs: " << endl;
+#endif//NDEBUG
 	for(auto fit = m_preinputs.begin(); fit != m_preinputs.end(); fit++) {
-		argExpand(fit, m_preinputs);
+		m_preoutputs.push_back(basename(*fit));
 #ifndef NDEBUG
-		cerr << "\t" << *fit << endl;
+		cerr << "\t" << m_preoutputs.back() << endl;
 #endif//ifndef NDEBUG
 	}
 
@@ -633,10 +655,73 @@ int Chain::Link::resolveTree(list<string>& callstack)
 			<< " from " << m_sourcefile << ":" << m_line << endl;
 		return -1;
 	}
+	
+	ret = nameOutputs();
+
 #ifndef NDEBUG
 	write("RESOLVED!\n");
 #endif //NDEBUG
 	m_resolved = true;
+	return 0;
+}
+
+
+int Chain::Link::nameOutputs()
+{
+	regex exp("\\{([^}]*)\\}");
+	string otemp; // output template
+	string basepath;
+	string path;
+	if(!m_parent->m_outdir.empty())
+		otemp = m_parent->m_outdir;
+	std::ostringstream oss;
+
+	m_outputs.resize(m_inputs.size());
+	for(size_t jj=0; jj<m_outputs.size(); jj++) {
+		m_outputs[jj].resize(m_preoutputs.size());
+		oss.str("");
+
+		// for the job, get the basepath, either from OUTDIR or by using
+		// all of the metadata fixed together
+		if(!otemp.empty()) {
+			basepath = otemp;
+		} else {
+			// no outdir, just set the metadata together
+			for(size_t aa=0; aa<m_metadata.m_labels.size(); aa++) {
+				oss << m_metadata.gets(jj, aa) << "/";
+			}
+			basepath = oss.str();
+		}
+
+		// add the the final name to the basepath and resolve any
+		auto it = m_preoutputs.begin();
+		for(size_t aa=0; it != m_preoutputs.end(); it++, aa++) {
+#ifndef NDEBUG
+			cerr << "Naming Output: " << *it << endl;
+#endif //NDEBUG
+			oss.str("");
+			path = basepath + *it;
+#ifndef NDEBUG
+			cerr << path << endl;;
+#endif //NDEBUG
+			// resolve any variables in the path
+			std::sregex_iterator expIt(path.cbegin(), path.cend(), exp);
+			for(; expIt != ReEnd; expIt++) {
+#ifndef NDEBUG
+				cerr << (*expIt)[0] << " matched" << endl;
+#endif //NDEBUG
+				// find variable in metadata
+				string val = m_metadata.finds(jj, (*expIt)[1]);
+				oss << expIt->prefix() << val;
+			}
+			oss << expIt->suffix();
+#ifndef NDEBUG
+			cerr << otemp << *it << " -> " << oss.str() << endl;
+#endif //NDEBUG
+			m_outputs[jj][aa] = oss.str();
+		}
+	}
+
 	return 0;
 }
 
@@ -1079,6 +1164,7 @@ Chain::parseFile(string filename)
 	std::string idstR = "\\s*([0-9.]*)\\s*:";			// id string regex
 	std::string arstR = "\\s*\\[([^\\]\\s]*)\\]\\s*"; 	// array string regex
 	std::string nonwR = "\\s*([^\\s]+)\\s*"; 			// non-white regex
+	regex specialRe("\\s*(OUTDIR)\\s*=\\s*([\\{\\},/_[:alnum:]]*)\\s*");
 	regex varRe("\\s*([0-9a-zA-Z_]*)\\s*=\\s*([\\{\\},/_[:alnum:]]*)\\s*");
 	regex commaRe(",(?![^{]*\\})");
 //	regex inputRe("\\s*([0-9.]*)\\s*:\\s*(?:input|i)\\s*:\\s*\\[(.*)\\]\\s*=(\\s*[^\\s]+\\s*)");
@@ -1111,11 +1197,23 @@ Chain::parseFile(string filename)
 
 		if(regex_match(line, args, emptyRe)) {
 			// do nothing
+		} else if(regex_match(line, args, specialRe)) {
+			// special regular expressions
+			if(args[2].str().find_first_of(",") != string::npos) {
+				cerr << "Special variables cannot contain commas, they must "
+					"be VARIABLE=VALUE" << endl;
+				return -1;
+			}
+			if(args[1] == "OUTDIR") {
+				m_outdir = args[2].str();
+			} else {
+				cerr << "Uknown special variable" << endl;
+			}
 		} else if(regex_match(line, args, varRe)) {
-		/**********************************************
-		 * Variable declaration: 
-		 *		match var=val[,val[,val[...]]]
-		 *********************************************/
+			/**********************************************
+			 * Variable declaration: 
+			 *		match var=val[,val[,val[...]]]
+			 *********************************************/
 #ifndef NDEBUG
 			cerr << "---------------------------------------" << endl;
 			cerr << "Variables line:" << endl;
@@ -1147,12 +1245,12 @@ Chain::parseFile(string filename)
 			for(; regIt != tokEnd ; ++regIt) 
 				ret.first->second.push_back(*regIt);
 		} else if(regex_match(line, args, inputRe)) {
-			/*****************************************
+			/*******************************************************************
 			 * Input Declaration
 			 * 		match 
 			 *		uint[.int[.int]]:s[ource]:[file[,file[,...]]] = 
 			 *				({prov}[*,{prov}[*,{prov}]])
-			 *****************************************/
+			 ******************************************************************/
 			
 #ifndef NDEBUG
 			cerr << "---------------------------------------" << endl;
@@ -1184,6 +1282,10 @@ Chain::parseFile(string filename)
 			auto newleaf = new Link(filename, linenum, 
 						curleaf, prevleaf, args[2], args[3], this);
 
+			if(newleaf->m_err != 0) {
+				cerr << "Failing" << endl;
+				return -1;
+			}
 			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
 				cerr << "Error: redeclaration of " << newleaf->m_id << " in " 
@@ -1208,7 +1310,7 @@ Chain::parseFile(string filename)
 					"(ie 0, 0.1.0, any set of positive numbers will do) " << endl;
 				return -1 ;
 			} else if(prevleaf.empty()) {
-				prevleaf = args[1];
+				prevleaf = args[1].str();
 			} else if(args[1].str().empty()) {
 				auto tmp = getId(prevleaf);
 				tmp.back()++;
@@ -1222,6 +1324,10 @@ Chain::parseFile(string filename)
 #endif//ifndef NDEBUG
 			auto newleaf = new Link(filename, linenum, 
 						curleaf, prevleaf, args[2], args[3], args[4], this);
+			if(newleaf->m_err != 0) {
+				cerr << "Failing" << endl;
+				return -1;
+			}
 
 			auto ret = m_links.insert(make_pair(newleaf->m_id, newleaf));
 			if(ret.second == false) {
@@ -1257,6 +1363,7 @@ Chain::parseFile(string filename)
  */
 Chain::Chain(string filename) : m_err(0)
 {
+	m_outdir = "";
 	int ret = parseFile(filename);
 	if(ret != 0) {
 		m_links.clear();
@@ -1309,6 +1416,63 @@ void Chain::dumpgraph()
 					cerr << "\t\tFile:" << iia->filename << endl;
 				}
 			}
+		}
+	}
+}
+
+// TODO, move expansion here
+// TODO, separate input/output numbering
+void Chain::buildCommands()
+{
+	regex exp("\\{(-?[0-9]*)\\}");
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+		cerr << it->second->m_id << ":" << it->second->m_cmd << endl;
+		for(size_t jj=0; jj<it->second->m_inputs.size(); jj++) {
+			string command = it->second->m_cmd;
+			cerr << "jj: " << jj << " " << command << endl;
+
+			std::ostringstream oss;
+			
+			// fill in all {0} variables with the corresponsing input/output
+			std::sregex_iterator rit(command.cbegin(), command.cend(), exp);
+			for(; rit != ReEnd; rit++) {
+				cerr << (*rit)[0] << "->" << (*rit)[1] << "->" ;
+				int in_i = atoi((*rit)[1].str().c_str());
+				int out_i = in_i - it->second->m_inputs[jj].size();
+				auto& input = it->second->m_inputs[jj];
+				auto& output = it->second->m_outputs[jj];
+
+				cerr << in_i << "," << out_i << endl;
+				oss << rit->prefix();
+				string file;
+				if(out_i >= 0) {
+					cerr << "Out: " << out_i << endl;
+					//its from the output list
+					file = output[out_i];
+				} else if(in_i >= 0) {
+					cerr << "In: " << in_i << endl;
+					// its from the input list, resolve to an output
+					if(input[in_i].source) {
+						size_t job = input[in_i].procnum;
+						size_t outnum = input[in_i].outnum;
+#ifndef NDEBUG
+						cerr << job << "," << outnum << "," << input[in_i].source;
+						cerr << "," << input[in_i].source->m_outputs.size();
+						cerr << "," << input[in_i].source->m_outputs[job].size() << endl;
+#endif //NDEBUG
+						// TODO check lengths, to make sure people don't reference outputs
+						// that don't exist, maybe do it earlier...
+						file = input[in_i].source->m_outputs[job][outnum];
+					} else {
+						file = input[in_i].filename;
+					}
+				}
+
+				cerr << file << endl;
+				oss << file;
+			}
+			cerr << it->second->m_cmd << "\nresolved to\n" << oss.str() << endl;
+
 		}
 	}
 }
