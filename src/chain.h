@@ -58,6 +58,7 @@ public:
 	
 	int resolveTree();
 	void dumpgraph();
+	void dumpinputs();
 
 private:
 	std::unordered_map<std::string, Link*> m_links;
@@ -113,7 +114,6 @@ class Chain::Link
 
 		int run();
 
-		void dumpgraph();
 
 	protected:
 

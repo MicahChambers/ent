@@ -633,8 +633,9 @@ int Chain::Link::resolveTree(list<string>& callstack)
 			<< " from " << m_sourcefile << ":" << m_line << endl;
 		return -1;
 	}
-
+#ifndef NDEBUG
 	write("RESOLVED!\n");
+#endif //NDEBUG
 	m_resolved = true;
 	return 0;
 }
@@ -649,7 +650,9 @@ int Chain::Link::resolveTree(list<string>& callstack)
  */
 int Chain::Link::resolveExpandableGlobals()
 {
+#ifndef NDEBUG
 	write("resolveExpandableGlobals\n");
+#endif //NDEBUG
 	
 	if(m_resolved)
 		return 0;
@@ -767,7 +770,6 @@ int Chain::Link::mergeExternalMetadata(list<string>& callstack)
 			else
 				depnum = (*expIt)[3].str();
 
-			cerr << '"' << depnum << '"' << endl;
 			auto linkit = m_parent->m_links.find(depnum);
 			if(linkit != m_parent->m_links.end()) {
 #ifndef NDEBUG
@@ -1265,6 +1267,29 @@ Chain::Chain(string filename) : m_err(0)
 	resolveTree();
 }
 
+void Chain::dumpinputs()
+{
+	for(auto it = m_links.begin(); it != m_links.end(); it++) {
+		cerr << "ID: " << it->first << endl;
+		
+		auto iij=it->second->m_inputs.begin();
+		for(size_t jj=0; iij!=it->second->m_inputs.end(); jj++,iij++) {
+			cerr << "\t" << "Job#: " << jj << endl;
+
+			auto iia = iij->begin();
+			for(size_t aa=0; iia != iij->end(); iia++, aa++) {
+				if(iia->source) {
+					cerr << "\t\tFrom Output:" << iia->source->m_id 
+						<< ", Arg: " << iia->outnum 
+						<< ", Job: " << iia->procnum << endl;
+				} else {
+					cerr << "\t\tFile:" << iia->filename << endl;
+				}
+			}
+		}
+	}
+}
+
 void Chain::dumpgraph()
 {
 	for(auto it = m_links.begin(); it != m_links.end(); it++) {
@@ -1320,6 +1345,7 @@ int Chain::resolveTree()
 		}
 	}
 
+	dumpinputs();
 	dumpgraph();
 	return 0;
 }
