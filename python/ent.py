@@ -1,6 +1,7 @@
 import os, time
 import re
 import uuid
+import copy
 VERBOSE=4
 
 class Ent:
@@ -19,8 +20,8 @@ class Ent:
 
     def run(self):
 
-        for path,ff in files.items():
-            print(path)
+        for path,ff in self.files.items():
+            print("Readying %s" % path)
             if ff.makeready() != 0:
                 return -1
 
@@ -87,8 +88,8 @@ class Ent:
             varmatch = varre.fullmatch(line)
             if iomatch:
                 # expand inputs/outputs
-                inputs = re.split("\s+", iomatch.group(1))
-                outputs = re.split("\s+", iomatch.group(2))
+                inputs = re.split("\s+", iomatch.group(2))
+                outputs = re.split("\s+", iomatch.group(1))
 
                 # create a new branch
                 cbranch = Branch(inputs, outputs, self)
@@ -133,21 +134,29 @@ class File:
     # state variables
     mtime = None    # modification time
 
+    def __init__(self, path, gener):
+        self.abspath = os.path.abspath(path)
+        self.genr = gener
+
     def updateTime(self):
         try:
             #(mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime)
+            print(self.abspath)
             ftup = os.stat(self.abspath)
             self.mtime = ftup[8]
             print("last modified: %s" % self.mtime)
             return 0
         except FileNotFoundError:
+            print("File doesn't exist!\n%s" % self.abspath)
             return -1 
+        except PermissionError:
+            print("Don't have permissions to access:\n%s" % self.abspath)
 
     # check if the file is up-to-date
     def ready(self):
 
         # if the parent has changed, then not ready
-        if genr != None and genr.updated:
+        if self.genr != None and self.genr.updated:
             return False
 
         try:
@@ -165,10 +174,10 @@ class File:
 
     # does whatever is necessary to produce this file
     def makeready(self):
-        if ready(self):
+        if self.ready():
             return 0
         else:
-            return genr.run()
+            return self.genr.run()
 
 
 class Branch:
@@ -189,7 +198,8 @@ class Branch:
         rings = list()
         varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
         outputs = [self.outputs]
-        
+        valreal = [dict()]
+
         # what if a variable is hidden inside of another. need to create a list of 
         # lookups for each
         while True:
@@ -199,42 +209,135 @@ class Branch:
             prevout = outputs
             match = None
             oii = None
-            for ii in range(len(outputs)):
-                for out in outputs[ii]:
+            ii = 0
+            for outs in outputs:
+                for out in outs:
                     
                     # find a variable
                     match = varre.fullmatch(out)
+                    if VERBOSE > 2: print(out)
                     if match:
+                        if VERBOSE > 1: print("Match found!")
                         oii = ii
+                        ii = len(outputs)
                         break;
+
+                ii = ii+1
+                if ii >= len(outputs):
+                    break;
 
             # no matches in any of the outputs, break
             if not match:
+                if VERBOSE > 1: print("No Matches found!")
                 break
 
-            print("Match: %s" %  match.group(2))
+            if VERBOSE > 3: print("Match: %s" %  match.group(2))
             if match.group(2) not in self.parent.variables:
                 print("Error! Unknown global variable reference: %s" % vv)
                 return -1
 
             if VERBOSE > 1: print("Replacing %s" % match.group(2))
-            
             subre = re.compile('\${\s*'+match.group(2)+'\s*}')
+ 
+            # we already have a value for this, just use that
+            if match.group(2) in valreal[oii]:
+                vv = valreal[oii][match.group(2)]
+                if VERBOSE > 2: print("Previous match: %s" , match.group(2))
+                if VERBOSE > 4: print(outputs[oii])
+
+                # perform replacement in all the variables
+                for ojj in range(len(outputs[oii])):
+                    outputs[oii][ojj] = subre.sub(vv, outputs[oii][ojj])
+
+                if VERBOSE > 4: print(outputs[oii])
+                continue
+
+            # no previous match, go ahead and expand
             values = self.parent.variables[match.group(2)]
             
             # save and remove matching realization
             outs = outputs[oii]
             del outputs[oii]
+            varprev = valreal[oii]
+            del valreal[oii]
 
             for vv in values:
                 newouts = []
+                newvar = copy.deepcopy(varprev)
+                newvar[match.group(2)] = vv
+
+                # perform replacement in all the variables
                 for out in outs:
                     newouts.append(subre.sub(vv, out))
-                print("%s, %s" % (vv, newouts))
+                
                 outputs.append(newouts)
+                valreal.append(newvar)
+                if VERBOSE > 3: print("%s, %s, %s" % (vv, newouts, newvar))
 
-            print(outputs)
 
+            if VERBOSE > 2: print(outputs)
+
+        # now that we have expanded the outputs, just need to expand input
+        # and create a ring to store each realization of the expansion process
+        print(outputs)
+        for outs,dicts in zip(outputs, valreal):
+            print(outs, dicts)
+            # create ring
+            oring = Ring()
+            oring.inputs = []
+
+            print(self.inputs)
+            # fill in variable values from outputs
+            for inval in self.inputs:
+                if VERBOSE > 1: print("inval: %s" % inval)
+                match = varre.fullmatch(inval)
+                while match:
+                    if match.group(2) in dicts:
+                        inval = match.group(1) + dicts[match.group(2)] + \
+                                match.group(3)
+                    elif match.group(2) in self.parent.variables:
+                        realvals = self.parent.variables[match.group(2)]
+                        if len(realvals) != 1:
+                            print('Error, input "%s" references variable "%s"'\
+                                    'which is a list, but that same variable '\
+                                    'doesn\'t exist in the output specification'\
+                                    'without referencing the output, there would'\
+                                    'be not way of differentiating different '\
+                                    'inputs! Please at the variable to the output '\
+                                    'somehow or rethink your Ent setup' % \
+                                    (inval, match.group(2)))
+                            return -1
+                        else:
+                            inval = match.group(1) + \
+                                    self.parent.variables[match.group(2)][0] + \
+                                    match.group(3)
+                    else:
+                        print('Error, input "%s" references variable "%s"'\
+                                'which is a unknown!' % (inval, match.group(2)))
+                        return -1
+                    
+                    # find next match
+                    match = varre.fullmatch(inval)
+                
+                if VERBOSE > 1: print("expanded inval: %s" % inval)
+                oring.inputs.append(inval)
+
+            oring.updated = True
+            oring.parent = self
+
+            if VERBOSE > 0: print(str(oring))
+
+            # append ring to list of rings
+            rings.append(oring)
+
+            # link files to oring
+            for out in outs: 
+                tmp = File(out, oring)
+                ofiles[out] = tmp
+                oring.outputs.append(tmp)
+
+        print(ofiles)
+        if VERBOSE > 0: print("DONE")
         return rings, ofiles
 
     def __str__(self):
@@ -255,16 +358,18 @@ class Ring:
     def run(self):
 
         # make sure all the inputs are ready
-        for ii in inputs:
-            if parent == None:
+        for ii in self.inputs:
+            if self.parent == None:
                 print("Error, parent has not been set!")
                 return -1
-            inputf = parent.get(ii)
 
-            if inputf == None:
-                print("Error, unknown input: %s" % ii)
-                return -1
-            elif inputf.makeready() != 0:
+            if ii not in self.parent.parent.files:
+                print("External input: %s" % ii)
+                continue
+
+            inputf = self.parent.parent.files[ii]
+            print("Make ready: %s" % inputf)
+            if inputf.makeready() != 0:
                 return -1
 
             return 0
@@ -273,10 +378,10 @@ class Ring:
         cmd = ""
 
         # update mtimes, and command used to generate
-        for ff in outputs:
+        for ff in self.outputs:
             if ff.updateTime() != 0:
                 return -1
 
-        updated = False
+        self.updated = False
         return 0
 
