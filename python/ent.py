@@ -1,5 +1,7 @@
 import os, time
 import re
+import uuid
+VERBOSE=4
 
 class Ent:
     error = 0
@@ -7,6 +9,13 @@ class Ent:
     variables = dict() # varname -> list of values
     rings = list()
     branches = list()
+
+    def __init__(self):
+        self.error = 0
+        self.files = dict()
+        self.variables = dict()
+        self.rings = list()
+        self.branches = list()
 
     def run(self):
 
@@ -16,28 +25,48 @@ class Ent:
                 return -1
 
     def parseV1(self, filename):
+        """Reads a file and makes modification to Ent class to incorporate
+        the read files. 
+
+        Variable names may be [a-zA-Z0-9_]*
+        Variable values may be anything but white space, multiple values may
+        be separated by white space
+
+        """
         iomre = re.compile("\s*([^:]*?)\s*:\s*(.*?)\s*")
-        varre = re.compile("\s*([^=]*?)\s*=\s*(.*?)\s*")
+        varre = re.compile("\s*([a-zA-Z0-9_]*)\s*=\s*(.*?)\s*")
         cmdre = re.compile("\t\s*(.*?)\s*")
+        commentre = re.compile("(.*?)#.*")
 
         with open(filename, "r") as f:
             lines = f.readlines()
         
+        # so that any remaining branches get cleared
+        lines.append("")
         lineno=0
         fullline = ""
         cbranch = None
         
         for line in lines:
+            # remove endlines
+            line = line.rstrip("\n")
+
+            # remove comments
+            match = commentre.search(line)
+            if match:
+                line = match.group(1)
+
             # check for continuation
             lineno = lineno + 1
-            fullline = fulline + line
-            if line[-1] == '\\':
+            fullline = fullline + line
+            if len(line) > 0 and line[-1] == '\\':
+                fullline = fullline[0:-1]
                 continue
             
-            # no continuation, so elminated fulline
+            # no continuation, so elminated fullline
             line = fullline
             fullline = ""
-            print("line %i:\n%s" % (lineno, line))
+            if VERBOSE > 2: print("line %i:\n%s" % (lineno, line))
 
             # if there is a current branch we are working
             # the first try to append commands to it
@@ -48,21 +77,22 @@ class Ent:
                     cbranch.cmds.append(cmdmatch.group(1))
                     continue
                 else:
-                    # done with current branch, save and remove current link
+                    # done with current branch, remove current link
                     self.branches.append(cbranch)
+                    if VERBOSE > 0: print("Adding branch: %s" % cbranch)
                     cbranch = None
             
             # if this isn't a command, try the other possibilities
             iomatch = iomre.fullmatch(line)
-            varmatch = iomre.fullmatch(line)
+            varmatch = varre.fullmatch(line)
             if iomatch:
                 # expand inputs/outputs
                 inputs = re.split("\s+", iomatch.group(1))
                 outputs = re.split("\s+", iomatch.group(2))
 
                 # create a new branch
-                cbranch = Branch(inputs, outputs)
-
+                cbranch = Branch(inputs, outputs, self)
+                if VERBOSE > 1: print("New Branch: %s:%s" % (inputs, outputs))
             elif varmatch:
                 # split variables
                 name = varmatch.group(1)
@@ -70,9 +100,11 @@ class Ent:
                 if name in self.variables:
                     print("Error! Redefined variable: %s" % name)
                     return -1
+                if VERBOSE > 1: print("Defining: %s = %s"%(name, str(values)))
                 self.variables[name] = values
             else:
-                print("Unparsed line(s) :\n%s"%line)
+                continue
+
 
         # now go ahead and expand all the branches into rings
         for bb in self.branches:
@@ -140,23 +172,78 @@ class File:
 
 
 class Branch:
+    uuid = uuid.uuid4()
     cmds = list()
     inputs = list()
     outputs = list()
 
-    def __init__(self, inputs, outputs):
+    def __init__(self, inputs, outputs, parent):
         self.cmds = list()
         self.inputs = inputs
         self.outputs = outputs
+        self.parent = parent
 
     def genRings(self):
         # produce all the rings from inputs/outputs
         ofiles = dict()
         rings = list()
+        varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
+        outputs = [self.outputs]
+        
+        # what if a variable is hidden inside of another. need to create a list of 
+        # lookups for each
+        while True:
+            print("outputs: %s" %outputs)
+            
+            # outer list realization of set of outputs (list)
+            prevout = outputs
+            match = None
+            oii = None
+            for ii in range(len(outputs)):
+                for out in outputs[ii]:
+                    
+                    # find a variable
+                    match = varre.fullmatch(out)
+                    if match:
+                        oii = ii
+                        break;
 
-        # TODO
+            # no matches in any of the outputs, break
+            if not match:
+                break
+
+            print("Match: %s" %  match.group(2))
+            if match.group(2) not in self.parent.variables:
+                print("Error! Unknown global variable reference: %s" % vv)
+                return -1
+
+            if VERBOSE > 1: print("Replacing %s" % match.group(2))
+            
+            subre = re.compile('\${\s*'+match.group(2)+'\s*}')
+            values = self.parent.variables[match.group(2)]
+            
+            # save and remove matching realization
+            outs = outputs[oii]
+            del outputs[oii]
+
+            for vv in values:
+                newouts = []
+                for out in outs:
+                    newouts.append(subre.sub(vv, out))
+                print("%s, %s" % (vv, newouts))
+                outputs.append(newouts)
+
+            print(outputs)
 
         return rings, ofiles
+
+    def __str__(self):
+        tmp = str(self.uuid) + "\n"
+        for cc in self.cmds:
+            tmp = tmp + ("\tCommand: %s\n" % cc)
+        tmp = tmp + ("\tInputs: %s\n" % self.inputs)
+        tmp = tmp + ("\tOutputs: %s\n" % self.outputs)
+        return tmp
 
 class Ring:
     inputs = list() #list of input files
@@ -177,7 +264,7 @@ class Ring:
             if inputf == None:
                 print("Error, unknown input: %s" % ii)
                 return -1
-            elif: inputf.makeready() != 0:
+            elif inputf.makeready() != 0:
                 return -1
 
             return 0

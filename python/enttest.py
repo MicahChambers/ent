@@ -1,8 +1,10 @@
+#!/usr/bin/python3
+
 import ent
 import sys
 
 def main(argv):
-    entobj = Ent()
+    entobj = ent.Ent()
     entobj.parseV1("ENTFILE")
 
 if __name__ == "__main__":
