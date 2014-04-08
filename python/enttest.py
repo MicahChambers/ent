@@ -7,7 +7,7 @@ def main(argv):
     entobj = ent.Ent()
     entobj.parseV1("ENTFILE")
 
-    entobj.run()
+    entobj.batch()
 
 if __name__ == "__main__":
     main(sys.argv)

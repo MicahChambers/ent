@@ -1,6 +1,7 @@
 import os, time
 import re
 import uuid
+import hashlib
 import copy
 VERBOSE=4
 
@@ -18,12 +19,54 @@ class Ent:
         self.rings = list()
         self.branches = list()
 
+    def batch(self):
+
+        fexist = set() # files that exist
+        fronts = []
+
+        queue = [rr for rr in self.rings]
+        change = True 
+
+        while len(queue) > 0 and change:
+            # add any jobs that can be run to the current front
+            print("Files created: %s " % fexist)
+            front = []
+            newexist = set()
+            for rr in range(len(queue)):
+                ready = True
+                # check to see if all the inputs exist
+                for ii in queue[rr].inputs:
+                    if ii not in fexist:
+                        print("%s doesn't exist yet" % ii)
+                        ready = False
+                        break
+
+                # if its ready add to current front, add output
+                # to list of done 
+                if ready:
+                    newexist.update(queue[rr].outputs)
+                    front.append(queue[rr])
+                    queue[rr] = None
+                    change = True
+
+            # done with current pass of queue, remove elements and 
+            # add new exist files to fexist
+            fexist.update(newexist)
+            fronts.append(front)
+            queue = [qq for qq in queue if qq != None];
+
+        if len(queue) > 0:
+            print("Error, jobs exist without a way to generate their inputs")
+            return -1
+
+        for ff in fronts:
+            for rr in ff:
+                print(rr.cmd)
+
     def run(self):
 
-        for path,ff in self.files.items():
-            print("Readying %s" % path)
-            if ff.makeready() != 0:
-                return -1
+        for rr in self.rings:
+            rr.run()
 
     def parseV1(self, filename):
         """Reads a file and makes modification to Ent class to incorporate
@@ -125,6 +168,21 @@ class Ent:
                 else:
                     self.files[fname] = fobj
 
+        # determine which inputs are external
+        for rr in self.rings:
+            for ii in rr.inputs:
+                if ii not in self.files:
+                    print("External input")
+                    tmp = ExtRing()
+                    tmp.inputs = []
+                    tmp.outputs.append(ii)
+                    tmp.updated = True
+                    tmp.gparent = self
+
+                    print(tmp)
+
+                    self.rings.append(tmp)
+                    self.files[ii] = tmp
         return 0
 
 class File:
@@ -134,14 +192,13 @@ class File:
     # state variables
     mtime = None    # modification time
 
-    def __init__(self, path, gener):
+    def __init__(self, path, gener, cachepath=None):
         self.abspath = os.path.abspath(path)
         self.genr = gener
 
     def updateTime(self):
         try:
             #(mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime)
-            print(self.abspath)
             ftup = os.stat(self.abspath)
             self.mtime = ftup[8]
             print("last modified: %s" % self.mtime)
@@ -179,6 +236,9 @@ class File:
         else:
             return self.genr.run()
 
+    def __str__(self):
+        out = "File (" + self.abspath + ")"
+        return out
 
 class Branch:
     uuid = uuid.uuid4()
@@ -334,8 +394,9 @@ class Branch:
             for out in outs: 
                 tmp = File(out, oring)
                 ofiles[out] = tmp
-                oring.outputs.append(tmp)
+                oring.outputs.append(out)
 
+        # find external files referenced as inputs
         print(ofiles)
         if VERBOSE > 0: print("DONE")
         return rings, ofiles
@@ -348,40 +409,48 @@ class Branch:
         tmp = tmp + ("\tOutputs: %s\n" % self.outputs)
         return tmp
 
+class ExtRing:
+    inputs = list() #list of input files   (strings)
+    outputs = list() #list of output files (strings)
+    updated = True  # when updated leave set until next run
+    gparent = None
+
+    def batch(self):
+        print("Batch ExtRing: %s" % self)
+
+
+    def run(self):
+        print("Run ExtRing: %s" % self)
+
+
+    def __str__(self):
+        out = "ExtRing\n"
+        out = out + "Inputs: " + str(self.inputs) + "\n"
+        out = out + "Outputs: " + str(self.outputs) + "\n"
+        out = out + "Updated: " + str(self.updated) + "\n"
+        out = out + "Gparent: " + str(self.gparent) + "\n"
+
+        return out
+
 class Ring:
-    inputs = list() #list of input files
-    outputs = list() #list of output files
+    inputs = list() #list of input files   (strings)
+    outputs = list() #list of output files (strings)
     cmd = "" 
     updated = True  # when updated leave set until next run
     parent = None
 
+    # TODO instead of run, just prepare batches
+    def batch(self):
+        print("Batch Ring: %s" % self)
+
+
     def run(self):
+        print("Run Ring: %s" % self)
 
-        # make sure all the inputs are ready
-        for ii in self.inputs:
-            if self.parent == None:
-                print("Error, parent has not been set!")
-                return -1
-
-            if ii not in self.parent.parent.files:
-                print("External input: %s" % ii)
-                continue
-
-            inputf = self.parent.parent.files[ii]
-            print("Make ready: %s" % inputf)
-            if inputf.makeready() != 0:
-                return -1
-
-            return 0
-
-        # run process
-        cmd = ""
-
-        # update mtimes, and command used to generate
-        for ff in self.outputs:
-            if ff.updateTime() != 0:
-                return -1
-
-        self.updated = False
-        return 0
-
+    def __str__(self):
+        out = "Ring\n"
+        out = out + "Inputs: " + str(self.inputs) + "\n"
+        out = out + "Outputs: " + str(self.outputs) + "\n"
+        out = out + "Updated: " + str(self.updated) + "\n"
+        out = out + "parent: " + str(self.parent) + "\n"
+        return out
