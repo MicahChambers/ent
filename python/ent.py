@@ -3,9 +3,14 @@ import re
 import uuid
 import hashlib
 import copy
+        
+varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=4
 
 class Ent:
+    """ Main Ent Class, all others are derived from this. This stores global 
+    variables, all jobs, all files etc.
+    """
     error = 0
     files = dict()   # filename -> File
     variables = dict() # varname -> list of values
@@ -20,6 +25,8 @@ class Ent:
         self.branches = list()
 
     def batch(self):
+        """ Batch up all the jobs and generate a list of jobs that can be
+        run simultaneously as a group"""
 
         fexist = set() # files that exist
         fronts = []
@@ -64,13 +71,18 @@ class Ent:
                 print(rr.cmd)
 
     def run(self):
-
+        """ Start the jobs """
         for rr in self.rings:
             rr.run()
 
     def parseV1(self, filename):
         """Reads a file and makes modification to Ent class to incorporate
-        the read files. 
+        the read files. This populates 
+
+        self.files      - all inputs or outputs, dict of name->File
+        self.rings      - jobs with specific inputs and outputs
+        self.branches   - jobs prior to resolution
+        self.variables  - global variables
 
         Variable names may be [a-zA-Z0-9_]*
         Variable values may be anything but white space, multiple values may
@@ -177,7 +189,6 @@ class Ent:
                     tmp.inputs = []
                     tmp.outputs.append(ii)
                     tmp.updated = True
-                    tmp.gparent = self
 
                     print(tmp)
 
@@ -186,15 +197,21 @@ class Ent:
         return 0
 
 class File:
+    """ Keeps track of a particular files metdata. Obviously this includes a
+    path, but also keeps track of whether the file has been updated since the
+    last run. """
+
     abspath = ""  # absolute path
+    realpath = ""  # real path, in certain cases the real path may be modified
     genr = None   # pointer to the ring which generates the file
+    users = []
 
     # state variables
     mtime = None    # modification time
 
-    def __init__(self, path, gener, cachepath=None):
+    def __init__(self, path):
         self.abspath = os.path.abspath(path)
-        self.genr = gener
+        self.users = []
 
     def updateTime(self):
         try:
@@ -211,8 +228,6 @@ class File:
 
     # check if the file is up-to-date
     def ready(self):
-
-        # if the parent has changed, then not ready
         if self.genr != None and self.genr.updated:
             return False
 
@@ -241,27 +256,35 @@ class File:
         return out
 
 class Branch:
+    """ A branch is a job that has not been split up into rings (which are the
+    actual jobs with resolved filenames"""
+
     uuid = uuid.uuid4()
     cmds = list()
     inputs = list()
     outputs = list()
 
-    def __init__(self, inputs, outputs, parent):
+    def __init__(self, inputs, outputs):
         self.cmds = list()
         self.inputs = inputs
         self.outputs = outputs
-        self.parent = parent
 
-    def genRings(self):
+    def genRings(self, gfiles, gvars):
+        """ The "main" function of Branch is genRings. It produces a list of 
+        rings (which are specific jobs with specific inputs and outputs)
+        and updates files with any newly refernenced files. May need global
+        gvars to resolve file names.
+        
+        gfiles - global gets updated
+        gvars - global variables used to look up values
+        
+        """
+        
         # produce all the rings from inputs/outputs
-        ofiles = dict()
         rings = list()
-        varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
         outputs = [self.outputs]
         valreal = [dict()]
 
-        # what if a variable is hidden inside of another. need to create a list of 
-        # lookups for each
         while True:
             print("outputs: %s" %outputs)
             
@@ -291,21 +314,24 @@ class Branch:
                 if VERBOSE > 1: print("No Matches found!")
                 break
 
-            if VERBOSE > 3: print("Match: %s" %  match.group(2))
-            if match.group(2) not in self.parent.variables:
+            pref = match.group(1)
+            vname = match.group(2)
+            suff = match.group(3)
+            if VERBOSE > 3: print("Match: %s" %  vname)
+            if vname not in gvars:
                 print("Error! Unknown global variable reference: %s" % vv)
                 return -1
 
-            if VERBOSE > 1: print("Replacing %s" % match.group(2))
-            subre = re.compile('\${\s*'+match.group(2)+'\s*}')
+            if VERBOSE > 1: print("Replacing %s" % vname)
+            subre = re.compile('\${\s*'+vname+'\s*}')
  
             # we already have a value for this, just use that
-            if match.group(2) in valreal[oii]:
-                vv = valreal[oii][match.group(2)]
-                if VERBOSE > 2: print("Previous match: %s" , match.group(2))
+            if vname in valreal[oii]:
+                vv = valreal[oii][vname]
+                if VERBOSE > 2: print("Previous match: %s" , vname)
                 if VERBOSE > 4: print(outputs[oii])
 
-                # perform replacement in all the variables
+                # perform replacement in all the gvars 
                 for ojj in range(len(outputs[oii])):
                     outputs[oii][ojj] = subre.sub(vv, outputs[oii][ojj])
 
@@ -313,7 +339,7 @@ class Branch:
                 continue
 
             # no previous match, go ahead and expand
-            values = self.parent.variables[match.group(2)]
+            values = gvars[vname]
             
             # save and remove matching realization
             outs = outputs[oii]
@@ -324,9 +350,9 @@ class Branch:
             for vv in values:
                 newouts = []
                 newvar = copy.deepcopy(varprev)
-                newvar[match.group(2)] = vv
+                newvar[vname] = vv
 
-                # perform replacement in all the variables
+                # perform replacement in all the gvars 
                 for out in outs:
                     newouts.append(subre.sub(vv, out))
                 
@@ -339,24 +365,25 @@ class Branch:
 
         # now that we have expanded the outputs, just need to expand input
         # and create a ring to store each realization of the expansion process
-        print(outputs)
-        for outs,dicts in zip(outputs, valreal):
-            print(outs, dicts)
-            # create ring
-            oring = Ring()
-            oring.inputs = []
+        for curouts, curvars in zip(outputs, valreal):
+            curins = []
 
-            print(self.inputs)
             # fill in variable values from outputs
             for inval in self.inputs:
                 if VERBOSE > 1: print("inval: %s" % inval)
                 match = varre.fullmatch(inval)
                 while match:
-                    if match.group(2) in dicts:
-                        inval = match.group(1) + dicts[match.group(2)] + \
-                                match.group(3)
-                    elif match.group(2) in self.parent.variables:
-                        realvals = self.parent.variables[match.group(2)]
+                    pref = match.group(1)
+                    name = match.group(2)
+                    suff = match.group(3)
+
+                    # resolve variable name
+                    if name in curvars:
+                        inval = pref + curvars[name] + suff
+                    elif name in gvars:
+                        # if it is a global variable, the it must not have multiple
+                        # values (list) 
+                        realvals = gvars[name]
                         if len(realvals) != 1:
                             print('Error, input "%s" references variable "%s"'\
                                     'which is a list, but that same variable '\
@@ -365,40 +392,52 @@ class Branch:
                                     'be not way of differentiating different '\
                                     'inputs! Please at the variable to the output '\
                                     'somehow or rethink your Ent setup' % \
-                                    (inval, match.group(2)))
+                                    (inval, name))
                             return -1
                         else:
-                            inval = match.group(1) + \
-                                    self.parent.variables[match.group(2)][0] + \
-                                    match.group(3)
+                            inval = pref + gvars[name][0] + suff
                     else:
                         print('Error, input "%s" references variable "%s"'\
-                                'which is a unknown!' % (inval, match.group(2)))
+                                'which is a unknown!' % (inval, name))
                         return -1
                     
                     # find next match
                     match = varre.fullmatch(inval)
-                
+            
                 if VERBOSE > 1: print("expanded inval: %s" % inval)
-                oring.inputs.append(inval)
+                curins.append(inval)
+            
+            # find inputs and outputs in the global files database, and then
+            # pass them in as a list to the new ring
+            
+            # change curins to list of Files, instead of strings
+            for ii in range(len(curins)):
+                if curins[ii] in gfiles:
+                    curins[ii] = gfiles[curins[ii]]
+                else:
+                    # since the file doesn't exist yet, create as placeholder
+                    name = curins[ii]
+                    curins[ii] = File(name)
+                    gfiles[name] = curins[ii]
 
-            oring.updated = True
-            oring.parent = self
+            # find outputs 
+            for ii in range(len(curouts)):
+                if curouts[ii] in gfiles:
+                    curouts[ii] = gfiles[curouts[ii]]
+                else:
+                    name = curouts[ii]
+                    curouts[ii] = File(name)
+                    gfiles[name] = curouts[ii]
 
+            # append ring to list of rings
+            oring = Ring(curins, curouts)
+            
             if VERBOSE > 0: print(str(oring))
 
             # append ring to list of rings
             rings.append(oring)
 
-            # link files to oring
-            for out in outs: 
-                tmp = File(out, oring)
-                ofiles[out] = tmp
-                oring.outputs.append(out)
-
         # find external files referenced as inputs
-        print(ofiles)
-        if VERBOSE > 0: print("DONE")
         return rings, ofiles
 
     def __str__(self):
@@ -409,35 +448,28 @@ class Branch:
         tmp = tmp + ("\tOutputs: %s\n" % self.outputs)
         return tmp
 
-class ExtRing:
-    inputs = list() #list of input files   (strings)
-    outputs = list() #list of output files (strings)
-    updated = True  # when updated leave set until next run
-    gparent = None
-
-    def batch(self):
-        print("Batch ExtRing: %s" % self)
-
-
-    def run(self):
-        print("Run ExtRing: %s" % self)
-
-
-    def __str__(self):
-        out = "ExtRing\n"
-        out = out + "Inputs: " + str(self.inputs) + "\n"
-        out = out + "Outputs: " + str(self.outputs) + "\n"
-        out = out + "Updated: " + str(self.updated) + "\n"
-        out = out + "Gparent: " + str(self.gparent) + "\n"
-
-        return out
-
 class Ring:
-    inputs = list() #list of input files   (strings)
-    outputs = list() #list of output files (strings)
+    """ A job with a concrete set of inputs and outputs """
+    inputs = list() #list of input files   (File)
+    outputs = list() #list of output files (File)
     cmd = "" 
     updated = True  # when updated leave set until next run
-    parent = None
+
+    def __init__(self, inputs, outputs):
+        self.inputs = inputs
+        self.outputs = outputs
+
+        # make ourself the generator for the outputs
+        for ff in self.outputs:
+            if ff.genr:
+                print("Error! Generator already given for file %s" % ff.abspath)
+                raise ValueError
+            else:
+                ff.genr = self
+
+        # add ourself to the list of users of the inputs
+        for ff in self.inputs:
+            ff.users.append(self)
 
     # TODO instead of run, just prepare batches
     def batch(self):
@@ -452,5 +484,4 @@ class Ring:
         out = out + "Inputs: " + str(self.inputs) + "\n"
         out = out + "Outputs: " + str(self.outputs) + "\n"
         out = out + "Updated: " + str(self.updated) + "\n"
-        out = out + "parent: " + str(self.parent) + "\n"
         return out
