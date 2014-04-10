@@ -75,6 +75,69 @@ class Ent:
         for rr in self.rings:
             rr.run()
 
+    def setuptodate(self, filename):
+        """ Reads a history file. Determines which files are 
+        up to date, and which need to be updated.
+        
+        """ 
+        
+        # set all as out-of-date
+        for fn, fclass in self.files.items():
+            fclass.uptodate = False
+
+        fhist = [()]
+        
+        # for each history file, check whether cache is out of date
+        for fn in fhist:
+
+            if fn.path in self.files:
+                fclass = self.files[fn.path]
+                cachef = join(self.cachedir, fclass.abspath)
+                outf = fclass.abspath
+
+                if fn.md5 == md5(cachef):
+                    # cache file up to date
+                    fclass.uptodate = True
+                elif fn.md5 == md5(outf):
+                    # cache not up to date, but out is
+                    copy(source = outf, target = cachef)
+                    fclass.uptodate = True
+        
+        # find all the generator-less inputs and make them uptodate by copying
+        for fn, fclass in self.files.items():
+
+            if fclass.genr == None and not fclass.uptodate:
+                cachef = join(self.cachedir, fclass.abspath)
+                outf = fclass.abspath
+                copy(source = outf, target = cachef)
+
+                fclass.uptodate = True
+
+        # propagate uptodate status
+        queue = [fclass for fclass in self.files.values() if not fclass.uptodate]
+        while len(queue) > 0:
+            fclass = queue.pop()
+            
+            # if not up to date, make all the children no up to date, and 
+            # add to queue
+            if not fclass.uptodate:
+                # user is a ring that uses this as an input
+                for user in fclass.users:
+
+                    # child is an output from the given user ring
+                    for child in user.outputs:
+                        if fclass not in child.inputs:
+                            return -1
+
+                        # only enqueue if it hadn't been fixed yet
+                        # prevents loops
+                        if child.uptodate:
+                            child.uptodate = False
+                            queue.append(child)
+        
+        # alright everything should be up to date
+        return 0
+
     def parseV1(self, filename):
         """Reads a file and makes modification to Ent class to incorporate
         the read files. This populates 
