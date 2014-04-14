@@ -4,8 +4,31 @@ import uuid
 import hashlib
 import copy
         
+urire = re.compile("^\s*ssh://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)(?:([0-9]+))?(/.*)?")
 varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=4
+
+def parseURI(uri):
+    rmatch = urire.search(uri)
+    ruser = rmatch.group(1)
+    rhost = rmatch.group(2)
+    if rmatch.group(3):
+        rport = int(rmatch.group(3))
+    else:
+        rport = 22
+    rpath = rmatch.group(4)
+    return (ruser, rhost, rport, rpath)
+
+class InputError(Exception):
+    """Exception raised for errors in the input.
+       Attributes:
+       expr -- input expression in which the error occurred
+       msg  -- explanation of the error
+    """
+                                    
+    def __init__(self, expr, msg):
+        self.expr = expr
+        self.msg = msg
 
 class Ent:
     """ Main Ent Class, all others are derived from this. This stores global 
@@ -14,6 +37,7 @@ class Ent:
     error = 0
     files = dict()   # filename -> File
     variables = dict() # varname -> list of values
+    remotes = dict() # user@host:port -> Remote
     rings = list()
     branches = list()
 
@@ -224,39 +248,18 @@ class Ent:
             else:
                 continue
 
+        remote = self.variables.getdefault(".REMOTE")
 
         # now go ahead and expand all the branches into rings
         for bb in self.branches:
 
             # get rings and files this generates
-            rlist, fdict = bb.genRings()
+            rlist = bb.genRings(self.files, self.variables, 
+                    self.remotes, remote)
 
             # add rings to list of rings
             self.rings.extend(rlist)
             
-            # add all the output files to the internal dict of files
-            for fname,fobj in fdict.items():
-                if fname in self.files:
-                    print("Error, two commands generating file %s, "\
-                            "keeping first" % fname)
-                    return -1
-                else:
-                    self.files[fname] = fobj
-
-        # determine which inputs are external
-        for rr in self.rings:
-            for ii in rr.inputs:
-                if ii not in self.files:
-                    print("External input")
-                    tmp = ExtRing()
-                    tmp.inputs = []
-                    tmp.outputs.append(ii)
-                    tmp.updated = True
-
-                    print(tmp)
-
-                    self.rings.append(tmp)
-                    self.files[ii] = tmp
         return 0
 
 class File:
@@ -264,16 +267,97 @@ class File:
     path, but also keeps track of whether the file has been updated since the
     last run. """
 
-    abspath = ""  # absolute path
-    realpath = ""  # real path, in certain cases the real path may be modified
+    cachehost = None  # server that cache is on (must be same as processor)
+    cachepath = ""  # path in the cache to use, usually a variant of finalpath 
+    finalhost = None  # server that final is on
+    finalpath = ""  # final path to use for input/output
+    cmtime = None # previous cache mtime, modification time of cache file
+    fmtime = None # previous final mtime, modification time of final file
+
     genr = None   # pointer to the ring which generates the file
     users = []
 
     # state variables
     mtime = None    # modification time
 
-    def __init__(self, path):
-        self.abspath = os.path.abspath(path)
+    def __init__(self, path, cachedir = "", remote ="", remotes = None):
+        """ Constructor for File class. 
+
+        Parameters
+        ----------
+        path : string
+            the input/output file path that may be on the local machine or on 
+            any remote server
+        cachedir : string, optional
+            base directory where cache file should be. If this is provided then
+            the cachepath will be this+path. If not provided then cachepath
+            will match finalpath.
+        remote : string, optional 
+            where processing will be performed. If not set then it will be 
+            the local machine. If it is set then cachehost will be set to this
+        remote : dict, optional 
+            dict of uri -> connection classes. If a new connection has to be
+            opened for the file, the connection will be added here
+        """
+        
+        # parse the input string
+        fuser, fhost, fport, fpath = parseURI(path)
+
+        # go ahead and set finalpath
+        self.finalpath = fpath
+
+        # if there is a host then see if we are already created, otherwise
+        # create the Remote
+        if fhost:
+            tmp = fuser + "@" + fhost + ":" + fport
+            if tmp in remotes:
+                self.finalhost = remotes[tmp]
+            else:
+                self.finalhost = Remote(fuser, fhost, fport)
+                remotes[tmp] = self.finalhost
+        else:
+            # just assume its local
+            self.finalhost = None
+        
+        # parse remote
+        if remote:
+            ruser, rhost, rport, rpath = parseURI(remote)
+
+        # parse cachedir
+        if cachedir:
+            cuser, chost, cport, cpath = parseURI(cachedir)
+            self.cachepath = os.path.join(cpath, self.finalpath)
+
+            # check that chost, 
+            #   if set, matches remote, 
+            #   if not set , just set the chost to remote
+            if chost or rhost:
+                if not chost and remote:
+                    cuser = ruser
+                    chost = rhost
+                    cport = rport
+                else if chost and not remote:
+                    raise InputError(cachedir+","+remote, "Error! Remote " \
+                            "cache specified, but non-remote processing is " \
+                            "specified")
+                else if rhost != chost or rport != cport or ruser != cuser:
+                    raise InputError(cachedir+","+remote, "Error! Remote " \
+                            "cache specified but it doesn't match the remote "\
+                            "processing node")
+
+                tmp = cuser + "@" + chost + ":" + cport
+                if tmp in remotes:
+                    self.cachehost = remotes[tmp]
+                else:
+                    self.cachehost = Remote(cuser, chost, cport)
+                    remotes[tmp] = self.cachehost
+            else:
+                # just local
+                self.cachehost = None
+        else:
+            # no cachedir, just set to finalpath
+            self.cachepath = self.finalpath
+
         self.users = []
 
     def updateTime(self):
@@ -332,14 +416,22 @@ class Branch:
         self.inputs = inputs
         self.outputs = outputs
 
-    def genRings(self, gfiles, gvars):
+    def genRings(self, gfiles, gvars, gremotes, remote):
         """ The "main" function of Branch is genRings. It produces a list of 
         rings (which are specific jobs with specific inputs and outputs)
         and updates files with any newly refernenced files. May need global
         gvars to resolve file names.
         
-        gfiles - global gets updated
-        gvars - global variables used to look up values
+        Parameters
+        ----------
+        gfiles : dict, {filename: File}
+            global dictionary of files, will be updated with any new files found
+        gvars : {varname: [value...] }
+            global variables used to look up values
+        remotes: dict, { "user@host:port" : Remote }
+            remote servers that we may access, lazily connect
+        remote: ssh://user@host:port
+            remote processing server (defualt for cachedir)
         
         """
         
@@ -480,16 +572,16 @@ class Branch:
                 else:
                     # since the file doesn't exist yet, create as placeholder
                     name = curins[ii]
-                    curins[ii] = File(name)
+                    curins[ii] = File(name, cachedir, remote, gremotes)
                     gfiles[name] = curins[ii]
 
-            # find outputs 
+            # find outputs (checking for double-producing is done in Ring, below)
             for ii in range(len(curouts)):
                 if curouts[ii] in gfiles:
                     curouts[ii] = gfiles[curouts[ii]]
                 else:
                     name = curouts[ii]
-                    curouts[ii] = File(name)
+                    curouts[ii] = File(name, cachedir, remote, gremotes)
                     gfiles[name] = curouts[ii]
 
             # append ring to list of rings
@@ -501,7 +593,7 @@ class Branch:
             rings.append(oring)
 
         # find external files referenced as inputs
-        return rings, ofiles
+        return rings 
 
     def __str__(self):
         tmp = str(self.uuid) + "\n"
@@ -525,8 +617,7 @@ class Ring:
         # make ourself the generator for the outputs
         for ff in self.outputs:
             if ff.genr:
-                print("Error! Generator already given for file %s" % ff.abspath)
-                raise ValueError
+                raise InputError(ff.finalpath, "Error! Generator already given")
             else:
                 ff.genr = self
 
