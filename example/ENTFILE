@@ -1,0 +1,77 @@
+#!/usr/bin/ent
+
+SINGLE=-1
+OPT=LBFGS
+ITERS=10000
+GSTOP=0.01
+FSTOP=0.00001
+ALPHA=0.01
+ALPHA_JAC=0
+SMOOTH=1.7 0.8 .3
+RESCALE=2
+HIST=16
+DIST=15
+BINS=250
+KERN=6
+
+.CACHE=/ifs/faculty/shattuck/micahc/thousand_connectomes/.cache
+NPLDIR=/ifs/students/mchambers/npl-latest/bin/
+BFIT=/ifs/students/mchambers/brainsfit/BRAINSFit 
+
+BASE=/ifs/faculty/shattuck/micahc/thousand_connectomes/Beijing_Zang/
+SUBJECT= \
+sub00440 sub07144 sub10277 sub16943 sub18758 sub22201 sub28792 sub30616 \
+sub34895 sub39725 sub44573 sub50498 sub53998 sub56757 sub62843 sub67435 \
+sub73098 sub80163 sub82826 sub87089 sub91145 sub93689 sub01018 sub07716 \
+sub10869 sub17093 sub18960 sub22595 sub28801 sub30988 sub34943 sub40037 \
+sub45552 sub50873 sub54890 sub58029 sub62966 sub67844 sub73245 sub80551 \
+sub82980 sub87776 sub91399 sub93856 sub01244 sub07717 sub10973 sub17159 \
+sub19642 sub22661 sub28907 sub31058 sub35309 sub40427 sub46058 sub50972 \
+sub55301 sub58332 sub64923 sub68012 sub73279 sub80569 sub83430 sub88306 \
+sub91952 sub94536 sub02403 sub08001 sub11072 sub17315 sub19974 sub22715 \
+sub28965 sub31729 sub35776 sub41170 sub46259 sub50985 sub55541 sub58614 \
+sub65467 sub68597 sub73421 sub80927 sub83624 sub88947 sub92430 sub95575 \
+sub04050 sub08251 sub11344 sub17586 sub20127 sub22890 sub29590 sub32517 \
+sub35806 sub41621 sub46541 sub51015 sub55736 sub59347 sub65659 sub69518 \
+sub74386 sub81062 sub83728 sub89088 sub92490 sub95755 sub04191 sub08455 \
+sub12220 sub17603 sub20246 sub26713 sub29785 sub32587 sub36580 sub42512 \
+sub48501 sub51586 sub55856 sub59448 sub66158 sub69696 sub74587 sub81074 \
+sub85030 sub89238 sub92544 sub96163 sub05267 sub08816 sub14238 sub17642 \
+sub20765 sub28206 sub30272 sub33747 sub36942 sub42555 sub48563 sub52044 \
+sub56136 sub61961 sub66528 sub71693 sub75878 sub82352 sub85543 sub89592 \
+sub92602 sub97442 sub06880 sub08992 sub15441 sub17688 sub20948 sub28403 \
+sub30310 sub33943 sub37602 sub42843 sub48676 sub52259 sub56659 sub62083 \
+sub66781 sub72654 sub76377 sub82426 sub85818 sub89742 sub92799 sub98353 \
+sub06899 sub10186 sub16091 sub18326 sub21115 sub28698 sub30556 sub33991 \
+sub38602 sub43290 sub49782 sub53572 sub56703 sub62438 sub66889 sub72678 \
+sub77440 sub82714 sub86114 sub89941 sub92859 sub98617 
+
+
+FMRIB=${BASE}/${SUBJECT}/func/rest
+T1B=${BASE}/${SUBJECT}/anat/mprage_anonymized
+
+${FMRIB}_bcl.nii.gz: ${FMRIB}.nii.gz
+	${NPLDIR}/imgSimpleSegment -m pthresh -i $< -o $>
+
+${FMRIB}_bc.nii.gz: ${FMRIB}.nii.gz ${FMRIB}_bcl.nii.gz
+	${NPLDIR}/imgSimpleBiasCorrect -i ${<0} -L ${<1}.nii.gz -o $>
+	
+${T1B}_bcl.nii.gz: ${T1B}.nii.gz
+	${NPLDIR}/imgSimpleSegment -m pthresh -i $< -o $>
+
+${T1B}_bc.nii.gz: ${T1B}.nii.gz ${T1B}_bcl.nii.gz
+	${NPLDIR}/imgSimpleBiasCorrect -i ${<0} -L ${<1}.nii.gz -o $>
+	
+${T1B}_fsp.nii.gz ${T1B}_fsp.tfm: ${T1B}_bc.nii.gz ${FMRIB}_bc.nii.gz 
+	${BFIT} --initializeTransformMode useMomentsAlign --useRigid \
+	--movingVolume ${<0} --fixedVolume ${<1} --outputVolume ${>0} \
+	--linearTransform ${>1}
+
+
+${FMRIB}_dc.nii.gz ${FMRIB}_field.nii.gz ${FMRIB}_mc.nii.gz ${FMRIB}_motion.txt: \
+				${FMRIB}_bc.nii.gz ${T1B}_fsp.nii.gz 
+	${NPLDIR}/fIDistortionCorrect -i ${<0} -s ${<1} -o ${>0} -f ${>1} ${SINGLE} \
+				-D 3 -d ${DIST} --mc-only ${<2} --motion ${< 3} -a ${ALPHA} \
+				-j ${ALPHA_JAC} --bd-iters ${ITERS} --bd-lbfgs-hist ${HIST} \
+	 			--opttype ${OPT} ${-S *SMOOTH} --bd-bins ${BINS} --bd-kern-rad ${KERN} \
+	 			--bd-gstop ${GSTOP} --bd-fstop ${FSTOP}
