@@ -1,0 +1,25 @@
+.REMOTE=ssh://ssh.bmap.ucla.edu
+
+BASE=${.PWD}/data/
+.SEEDFILE=${BASE}/.seed
+
+SUBJ =	10588 10659 10844 1103 1395 14298 15440 16051 1688 174 17614 1850 \
+		20207 20242 22670 2367 23713 27014 27641 28652 31866 32282 3886 4265 \
+		5778 6041 6645 7390 7866 9809
+RUN = 1 2 3
+
+FBASE = ${BASE}/${SUBJ}/func/
+SBASE = ${BASE}/${SUBJ}/struct/
+
+
+# reverse all the t1's for each subject
+${SBASE}/t1rev.txt : ${SBASE}/t1.txt
+	tac ${<0} > ${>0}
+
+# reverse all the runs
+${FBASE}/run_${RUN}_rev.txt: ${FBASE}/run_${RUN}.txt
+	tac ${<0} > ${>0}
+
+# concatinate runs within each subject
+${FBASE}/run_all.txt: ${FBASE}/run_${RUN}.txt
+	tac $< > ${>0}
