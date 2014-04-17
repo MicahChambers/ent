@@ -176,8 +176,8 @@ class Ent:
         be separated by white space
 
         """
-        iomre = re.compile("\s*([^:]*?)\s*:\s*(.*?)\s*")
-        varre = re.compile("\s*([a-zA-Z0-9_]*)\s*=\s*(.*?)\s*")
+        iomre = re.compile("\s*([^:](?!//)*?)\s*:\s*(.*?)\s*")
+        varre = re.compile("\s*([a-zA-Z0-9_.]*)\s*=\s*(.*?)\s*")
         cmdre = re.compile("\t\s*(.*?)\s*")
         commentre = re.compile("(.*?)#.*")
 
@@ -336,11 +336,11 @@ class File:
                     cuser = ruser
                     chost = rhost
                     cport = rport
-                else if chost and not remote:
+                elif chost and not remote:
                     raise InputError(cachedir+","+remote, "Error! Remote " \
                             "cache specified, but non-remote processing is " \
                             "specified")
-                else if rhost != chost or rport != cport or ruser != cuser:
+                elif rhost != chost or rport != cport or ruser != cuser:
                     raise InputError(cachedir+","+remote, "Error! Remote " \
                             "cache specified but it doesn't match the remote "\
                             "processing node")

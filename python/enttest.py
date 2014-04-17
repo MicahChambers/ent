@@ -3,11 +3,15 @@
 import ent
 import sys
 
-def main(argv):
+def main(args):
     entobj = ent.Ent()
-    entobj.parseV1("ENTFILE")
+
+    if len(args) > 0:
+        entobj.parseV1(args[0])
+    else:
+        entobj.parseV1("ENTFILE")
 
     entobj.batch()
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1:])
