@@ -2,16 +2,20 @@
 
 import ent
 import sys
+import os
 
 def main(args):
-    entobj = ent.Ent()
+    entobj = ent.Ent(os.getcwd())
 
     if len(args) > 0:
-        entobj.parseV1(args[0])
+        ret = entobj.parseV1(args[0])
     else:
-        entobj.parseV1("ENTFILE")
+        ret = entobj.parseV1("ENTFILE")
 
-    entobj.batch()
+    if ret != 0:
+        return ret 
+
+    entobj.pushCache()
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

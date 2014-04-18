@@ -4,20 +4,26 @@ import uuid
 import hashlib
 import copy
         
-urire = re.compile("^\s*ssh://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)(?:([0-9]+))?(/.*)?")
-varre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
+gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=4
 
 def parseURI(uri):
+    urire = re.compile("^\s*(ssh)://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)"\
+            "(?:([0-9]+))?(/.*)?")
+    print(uri)
     rmatch = urire.search(uri)
-    ruser = rmatch.group(1)
-    rhost = rmatch.group(2)
-    if rmatch.group(3):
-        rport = int(rmatch.group(3))
+    if not rmatch:
+        return (None, None, None, None, uri)
+
+    proto = rmatch.group(1)
+    ruser = rmatch.group(2)
+    rhost = rmatch.group(3)
+    if rmatch.group(4):
+        rport = int(rmatch.group(4))
     else:
         rport = 22
-    rpath = rmatch.group(4)
-    return (ruser, rhost, rport, rpath)
+    rpath = rmatch.group(5)
+    return (proto,ruser, rhost, rport, rpath)
 
 class InputError(Exception):
     """Exception raised for errors in the input.
@@ -30,6 +36,9 @@ class InputError(Exception):
         self.expr = expr
         self.msg = msg
 
+###############################################################################
+# Ent Class
+###############################################################################
 class Ent:
     """ Main Ent Class, all others are derived from this. This stores global 
     variables, all jobs, all files etc.
@@ -41,12 +50,23 @@ class Ent:
     rings = list()
     branches = list()
 
-    def __init__(self):
+    def __init__(self, working):
+        """ Ent Constructor """
         self.error = 0
         self.files = dict()
         self.variables = dict()
         self.rings = list()
         self.branches = list()
+
+        # initialize special variables
+        self.variables[".PWD"] = [working]
+
+#TODO HERE
+    def pushCache(self):
+        """ Copy files to cache, in preparation for running jobs """
+        for filename, fileobj in self.files.items():
+            fileobj.pushCache(self.remotes)
+
 
     def batch(self):
         """ Batch up all the jobs and generate a list of jobs that can be
@@ -176,7 +196,7 @@ class Ent:
         be separated by white space
 
         """
-        iomre = re.compile("\s*([^:](?!//)*?)\s*:\s*(.*?)\s*")
+        iomre = re.compile("\s*([^:]*?)\s*:(?!//)\s*(.*?)\s*")
         varre = re.compile("\s*([a-zA-Z0-9_.]*)\s*=\s*(.*?)\s*")
         cmdre = re.compile("\t\s*(.*?)\s*")
         commentre = re.compile("(.*?)#.*")
@@ -234,7 +254,9 @@ class Ent:
                 outputs = re.split("\s+", iomatch.group(1))
 
                 # create a new branch
-                cbranch = Branch(inputs, outputs, self)
+                print(inputs)
+                print(outputs)
+                cbranch = Branch(inputs, outputs)
                 if VERBOSE > 1: print("New Branch: %s:%s" % (inputs, outputs))
             elif varmatch:
                 # split variables
@@ -246,22 +268,46 @@ class Ent:
                 if VERBOSE > 1: print("Defining: %s = %s"%(name, str(values)))
                 self.variables[name] = values
             else:
+                if VERBOSE > 3: print("No Match")
                 continue
 
-        remote = self.variables.getdefault(".REMOTE")
+        # Get the REMOTE and CACHEDIR
+        # make sure they are single values
+        remote = self.variables.pop(".REMOTE", None)
+        cachedir = self.variables.pop(".CACHEDIR", None)
+        if remote != None:
+            if len(remote) != 1:
+                print("Error, invalid .REMOTE: %s" % remote)
+                return -1
+            else:
+                remote = remote[0]
+        
+        if cachedir != None:
+            if len(cachedir) != 1:
+                print("Error, invalid .REMOTE: %s" % cachedir)
+                return -1
+            else:
+                cachedir = cachedir[0]
 
         # now go ahead and expand all the branches into rings
         for bb in self.branches:
+            print(bb)
 
             # get rings and files this generates
             rlist = bb.genRings(self.files, self.variables, 
-                    self.remotes, remote)
+                    self.remotes, cachedir, remote)
+
+            if rlist == None:
+                return -1
 
             # add rings to list of rings
             self.rings.extend(rlist)
             
         return 0
 
+###############################################################################
+# File Class
+###############################################################################
 class File:
     """ Keeps track of a particular files metdata. Obviously this includes a
     path, but also keeps track of whether the file has been updated since the
@@ -280,7 +326,7 @@ class File:
     # state variables
     mtime = None    # modification time
 
-    def __init__(self, path, cachedir = "", remote ="", remotes = None):
+    def __init__(self, path, gremotes, cachedir = None, remote = None):
         """ Constructor for File class. 
 
         Parameters
@@ -288,20 +334,24 @@ class File:
         path : string
             the input/output file path that may be on the local machine or on 
             any remote server
-        cachedir : string, optional
-            base directory where cache file should be. If this is provided then
-            the cachepath will be this+path. If not provided then cachepath
-            will match finalpath.
-        remote : string, optional 
-            where processing will be performed. If not set then it will be 
-            the local machine. If it is set then cachehost will be set to this
-        remote : dict, optional 
+        gremotes : (modified) dict
             dict of uri -> connection classes. If a new connection has to be
             opened for the file, the connection will be added here
+        cache: string, optional
+            base directory where cache file should be. If this is provided then
+            the cachepath will be remote+this+path. If not provided then cachepath
+            will be remote+finalpath.
+        remote: string, optional 
+            where processing will be performed. If not set then it will be 
+            the local machine. If it is set then cachehost will be set to this
         """
         
+        ###################
+        # Final (Output/Input) Setup
+        ###################
+
         # parse the input string
-        fuser, fhost, fport, fpath = parseURI(path)
+        fproto, fuser, fhost, fport, fpath = parseURI(path)
 
         # go ahead and set finalpath
         self.finalpath = fpath
@@ -318,14 +368,19 @@ class File:
         else:
             # just assume its local
             self.finalhost = None
+       
+        ###################
+        # Cache Setup
+        ###################
         
         # parse remote
         if remote:
-            ruser, rhost, rport, rpath = parseURI(remote)
+            rproto, ruser, rhost, rport, rpath = parseURI(remote)
 
         # parse cachedir
         if cachedir:
-            cuser, chost, cport, cpath = parseURI(cachedir)
+            print(cachedir)
+            cproto, cuser, chost, cport, cpath = parseURI(cachedir)
             self.cachepath = os.path.join(cpath, self.finalpath)
 
             # check that chost, 
@@ -337,13 +392,13 @@ class File:
                     chost = rhost
                     cport = rport
                 elif chost and not remote:
-                    raise InputError(cachedir+","+remote, "Error! Remote " \
-                            "cache specified, but non-remote processing is " \
-                            "specified")
+                    raise InputError(str(cachedir)+","+str(remote), "Error! "\
+                            "Remote  cache specified, but non-remote processing"\
+                            " is specified")
                 elif rhost != chost or rport != cport or ruser != cuser:
-                    raise InputError(cachedir+","+remote, "Error! Remote " \
-                            "cache specified but it doesn't match the remote "\
-                            "processing node")
+                    raise InputError(str(cachedir)+","+str(remote), "Error! "\
+                            "Remote cache specified but it doesn't match the "\
+                            "remote processing node")
 
                 tmp = cuser + "@" + chost + ":" + cport
                 if tmp in remotes:
@@ -398,10 +453,17 @@ class File:
         else:
             return self.genr.run()
 
+    def pushCache(self, gremotes):
+        print("Cachehost: %s Cachepath: %s" %(self.cachehost, self.cachepath))
+        print("FinalHost: %s Finalpath: %s" %(self.finalhost, self.finalpath))
+        
     def __str__(self):
         out = "File (" + self.abspath + ")"
         return out
 
+###############################################################################
+# Branch Class
+###############################################################################
 class Branch:
     """ A branch is a job that has not been split up into rings (which are the
     actual jobs with resolved filenames"""
@@ -416,7 +478,7 @@ class Branch:
         self.inputs = inputs
         self.outputs = outputs
 
-    def genRings(self, gfiles, gvars, gremotes, remote):
+    def genRings(self, gfiles, gvars, gremotes, cache = None, remote = None):
         """ The "main" function of Branch is genRings. It produces a list of 
         rings (which are specific jobs with specific inputs and outputs)
         and updates files with any newly refernenced files. May need global
@@ -424,14 +486,16 @@ class Branch:
         
         Parameters
         ----------
-        gfiles : dict, {filename: File}
+        gfiles : (modified) dict, {filename: File} 
             global dictionary of files, will be updated with any new files found
-        gvars : {varname: [value...] }
+        gvars : dict {varname: [value...] }
             global variables used to look up values
-        remotes: dict, { "user@host:port" : Remote }
-            remote servers that we may access, lazily connect
-        remote: ssh://user@host:port
-            remote processing server (defualt for cachedir)
+        gremotes: (modified) dict, { "user@host:port" : Remote }
+            remote servers that we may access, lazily connect. We add new servers
+            we find referenced
+        remote: string (optional)
+            remote processing server (defualt for cachedir).
+            ssh://user@host:port/base/path/
         
         """
         
@@ -452,7 +516,7 @@ class Branch:
                 for out in outs:
                     
                     # find a variable
-                    match = varre.fullmatch(out)
+                    match = gvarre.fullmatch(out)
                     if VERBOSE > 2: print(out)
                     if match:
                         if VERBOSE > 1: print("Match found!")
@@ -475,7 +539,7 @@ class Branch:
             if VERBOSE > 3: print("Match: %s" %  vname)
             if vname not in gvars:
                 print("Error! Unknown global variable reference: %s" % vv)
-                return -1
+                return None 
 
             if VERBOSE > 1: print("Replacing %s" % vname)
             subre = re.compile('\${\s*'+vname+'\s*}')
@@ -526,62 +590,73 @@ class Branch:
             # fill in variable values from outputs
             for inval in self.inputs:
                 if VERBOSE > 1: print("inval: %s" % inval)
-                match = varre.fullmatch(inval)
-                while match:
-                    pref = match.group(1)
-                    name = match.group(2)
-                    suff = match.group(3)
+                
+                invals = [inval]
+                
+                # the expanded version (for instance if there are multi-value)
+                # arguments
+                final_invals = [] 
+                while len(invals) > 0:
+                    tmp = invals.pop()
+                    match = gvarre.fullmatch(tmp)
+                    if match:
+                        pref = match.group(1)
+                        name = match.group(2)
+                        suff = match.group(3)
 
-                    # resolve variable name
-                    if name in curvars:
-                        inval = pref + curvars[name] + suff
-                    elif name in gvars:
-                        # if it is a global variable, the it must not have multiple
-                        # values (list) 
-                        realvals = gvars[name]
-                        if len(realvals) != 1:
-                            print('Error, input "%s" references variable "%s"'\
-                                    'which is a list, but that same variable '\
-                                    'doesn\'t exist in the output specification'\
-                                    'without referencing the output, there would'\
-                                    'be not way of differentiating different '\
-                                    'inputs! Please at the variable to the output '\
-                                    'somehow or rethink your Ent setup' % \
-                                    (inval, name))
-                            return -1
+                        # resolve variable name
+                        if name in curvars: 
+                            # variable in the list of output vars, just sub in
+                            invals.append(pref + curvars[name] + suff)
+                        elif name in gvars:
+                            # if it is a global variable, then we don't have a 
+                            # value from output, if there are multiple values
+                            # then it is a compount (multivalue) input
+                            realvals = gvars[name]
+                            if len(realvals) == 1:
+                                tmp = pref + realvals[0] + suff
+                                invals.append(tmp)
+                            else:
+                                # multiple values, insert in reverse order, 
+                                # to make first value in list first to be 
+                                # resolved in next iteration
+                                tmp = [pref + vv + suff for vv in 
+                                        reversed(realvals)]
+                                invals.extend(tmp)
                         else:
-                            inval = pref + gvars[name][0] + suff
+                            print('Error, input "%s" references variable "%s"'\
+                                    'which is a unknown!' % (inval, name))
+                            return None
+                        
                     else:
-                        print('Error, input "%s" references variable "%s"'\
-                                'which is a unknown!' % (inval, name))
-                        return -1
-                    
-                    # find next match
-                    match = varre.fullmatch(inval)
+                        if VERBOSE > 1: print("expanded inval: %s" % tmp)
+                        final_invals.append(tmp)
             
-                if VERBOSE > 1: print("expanded inval: %s" % inval)
-                curins.append(inval)
-            
+                # insert finalized invals into curins 
+                curins.append(final_invals)
+
             # find inputs and outputs in the global files database, and then
             # pass them in as a list to the new ring
             
             # change curins to list of Files, instead of strings
-            for ii in range(len(curins)):
-                if curins[ii] in gfiles:
-                    curins[ii] = gfiles[curins[ii]]
-                else:
-                    # since the file doesn't exist yet, create as placeholder
-                    name = curins[ii]
-                    curins[ii] = File(name, cachedir, remote, gremotes)
-                    gfiles[name] = curins[ii]
+            print(curins)
+            for ingrp in curins:
+                for ii, name in enumerate(ingrp):
+                    if name in gfiles:
+                        ingrp[ii] = gfiles[name]
+                    else:
+                        # since the file doesn't exist yet, create as placeholder
+                        print(name)
+                        print(cache)
+                        ingrp[ii] = File(name, gremotes, cache, remote)
+                        gfiles[name] = ingrp[ii]
 
             # find outputs (checking for double-producing is done in Ring, below)
-            for ii in range(len(curouts)):
-                if curouts[ii] in gfiles:
-                    curouts[ii] = gfiles[curouts[ii]]
+            for ii, name in enumerate(curouts):
+                if name in gfiles:
+                    curouts[ii] = gfiles[name]
                 else:
-                    name = curouts[ii]
-                    curouts[ii] = File(name, cachedir, remote, gremotes)
+                    curouts[ii] = File(name, gremotes, cache, remote)
                     gfiles[name] = curouts[ii]
 
             # append ring to list of rings
@@ -603,9 +678,20 @@ class Branch:
         tmp = tmp + ("\tOutputs: %s\n" % self.outputs)
         return tmp
 
+###############################################################################
+# Branch Class
+###############################################################################
 class Ring:
     """ A job with a concrete set of inputs and outputs """
-    inputs = list() #list of input files   (File)
+
+    # inputs are nested so that outer values refer to 
+    # values specified in the command [0] [1] : [0] [1]
+    # and inner refer to any expanded values due to the 
+    # referred values above actually including lists ie:
+    # subj = 1 2 3
+    # /ello : /hello/${subj} /world
+    # inputs = [[/hello/1,/hello/2,/hello/3],[/world]]
+    inputs = list() #list of list of input files   (File)
     outputs = list() #list of output files (File)
     cmd = "" 
     updated = True  # when updated leave set until next run
@@ -622,8 +708,9 @@ class Ring:
                 ff.genr = self
 
         # add ourself to the list of users of the inputs
-        for ff in self.inputs:
-            ff.users.append(self)
+        for igrp in self.inputs:
+            for ff in igrp:
+                ff.users.append(self)
 
     # TODO instead of run, just prepare batches
     def batch(self):

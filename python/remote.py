@@ -67,8 +67,10 @@ class Remote:
     def run(self, cmd):
         stdin, stdout, stderr = self.client.exec_command(cmd)
 
-    def putD(self, local, remote):
-        """ Puts an entire file from memory to the remote server """
+    def smartPut(self, local, remote, rmod):
+        """ Puts file from some local directory to a remote directory if the 
+        file on the remote machine has a modification time different from rmod
+        """
         print("put")
 
     def getD(self, local, remote):
