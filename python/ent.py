@@ -3,6 +3,8 @@ import re
 import uuid
 import hashlib
 import copy
+
+from remote import Remote
         
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=4
@@ -330,7 +332,7 @@ class File:
     # state variables
     mtime = None    # modification time
 
-    def __init__(self, path, gremotes, cachedir = None, remote = None):
+    def __init__(self, path, remotes, cachedir = None, remote = None):
         """ Constructor for File class. 
 
         Parameters
@@ -338,7 +340,7 @@ class File:
         path : string
             the input/output file path that may be on the local machine or on 
             any remote server
-        gremotes : (modified) dict
+        remotes : (modified) dict
             dict of uri -> connection classes. If a new connection has to be
             opened for the file, the connection will be added here
         cache: string, optional
@@ -353,6 +355,10 @@ class File:
         ###################
         # Final (Output/Input) Setup
         ###################
+        
+        # if no cachedir specified, then assume its the same as path
+        if not cachedir:
+            cachedir=path
 
         # parse the input string
         fproto, fuser, fhost, fport, fpath = parseURI(path)
@@ -380,7 +386,7 @@ class File:
         # parse remote
         if remote:
             rproto, ruser, rhost, rport, rpath = parseURI(remote)
-
+        
         # parse cachedir
         if cachedir:
             print(cachedir)
@@ -404,7 +410,14 @@ class File:
                             "Remote cache specified but it doesn't match the "\
                             "remote processing node")
 
-                tmp = cuser + "@" + chost + ":" + cport
+                # make a name for the chost
+                tmp = ""
+                if cuser:
+                    tmp = cuser + "@"
+                tmp = tmp + chost
+                if cport:
+                    tmp = tmp + ":" + str(cport)
+
                 if tmp in remotes:
                     self.cachehost = remotes[tmp]
                 else:
