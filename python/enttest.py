@@ -15,6 +15,7 @@ def main(args):
     if ret != 0:
         return ret 
 
+    entobj.dumpJobs()
     entobj.pushCache()
 
 if __name__ == "__main__":

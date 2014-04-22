@@ -61,6 +61,10 @@ class Ent:
         # initialize special variables
         self.variables[".PWD"] = [working]
 
+    def dumpJobs(self):
+        for ring in self.rings:
+            print(ring)
+
 #TODO HERE
     def pushCache(self):
         """ Copy files to cache, in preparation for running jobs """
@@ -458,8 +462,9 @@ class File:
         print("FinalHost: %s Finalpath: %s" %(self.finalhost, self.finalpath))
         
     def __str__(self):
-        out = "File (" + self.abspath + ")"
-        return out
+        cache="\tCache: %s %s %s\n" %(self.cachehost,self.cachepath,self.cmtime)
+        main="\tMain: %s %s %s\n" %(self.finalhost,self.finalpath,self.fmtime)
+        return "File" + cache + main
 
 ###############################################################################
 # Branch Class
