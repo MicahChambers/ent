@@ -7,12 +7,11 @@ import copy
 from remote import Remote
         
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
-VERBOSE=4
+VERBOSE=10
 
 def parseURI(uri):
     urire = re.compile("^\s*(ssh)://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)"\
             "(?:([0-9]+))?(/.*)?")
-    print(uri)
     rmatch = urire.search(uri)
     if not rmatch:
         return (None, None, None, None, uri)
@@ -64,8 +63,7 @@ class Ent:
         self.variables[".PWD"] = [working]
 
     def dumpJobs(self):
-        for ring in self.rings:
-            print(ring)
+        pass
 
 #TODO HERE
     def pushCache(self):
@@ -235,7 +233,7 @@ class Ent:
             # no continuation, so elminated fullline
             line = fullline
             fullline = ""
-            if VERBOSE > 2: print("line %i:\n%s" % (lineno, line))
+            if VERBOSE > 4: print("line %i:\n%s" % (lineno, line))
 
             # if there is a current branch we are working
             # the first try to append commands to it
@@ -260,10 +258,8 @@ class Ent:
                 outputs = re.split("\s+", iomatch.group(1))
 
                 # create a new branch
-                print(inputs)
-                print(outputs)
                 cbranch = Branch(inputs, outputs)
-                if VERBOSE > 1: print("New Branch: %s:%s" % (inputs, outputs))
+                if VERBOSE > 3: print("New Branch: %s:%s" % (inputs, outputs))
             elif varmatch:
                 # split variables
                 name = varmatch.group(1)
@@ -271,10 +267,9 @@ class Ent:
                 if name in self.variables:
                     print("Error! Redefined variable: %s" % name)
                     return -1
-                if VERBOSE > 1: print("Defining: %s = %s"%(name, str(values)))
+                if VERBOSE > 3: print("Defining: %s = %s"%(name, str(values)))
                 self.variables[name] = values
             else:
-                if VERBOSE > 3: print("No Match")
                 continue
 
         # Get the REMOTE and CACHEDIR
@@ -295,9 +290,10 @@ class Ent:
             else:
                 cachedir = cachedir[0]
 
+        if VERBOSE > 3: print("Done With Initial Pass!")
+
         # now go ahead and expand all the branches into rings
         for bb in self.branches:
-            print(bb)
 
             # get rings and files this generates
             rlist = bb.genRings(self.files, self.variables, 
@@ -389,7 +385,6 @@ class File:
         
         # parse cachedir
         if cachedir:
-            print(cachedir)
             cproto, cuser, chost, cport, cpath = parseURI(cachedir)
             self.cachepath = os.path.join(cpath, self.finalpath)
 
@@ -475,9 +470,9 @@ class File:
         print("FinalHost: %s Finalpath: %s" %(self.finalhost, self.finalpath))
         
     def __str__(self):
-        cache="\tCache: %s %s %s\n" %(self.cachehost,self.cachepath,self.cmtime)
-        main="\tMain: %s %s %s\n" %(self.finalhost,self.finalpath,self.fmtime)
-        return "File" + cache + main
+        cache="Cache: %s %s %s," %(self.cachehost,self.cachepath,self.cmtime)
+        main="Main: %s %s %s" %(self.finalhost,self.finalpath,self.fmtime)
+        return cache + main
 
 ###############################################################################
 # Branch Class
@@ -486,7 +481,6 @@ class Branch:
     """ A branch is a job that has not been split up into rings (which are the
     actual jobs with resolved filenames"""
 
-    uuid = uuid.uuid4()
     cmds = list()
     inputs = list()
     outputs = list()
@@ -523,8 +517,6 @@ class Branch:
         valreal = [dict()]
 
         while True:
-            print("outputs: %s" %outputs)
-            
             # outer list realization of set of outputs (list)
             prevout = outputs
             match = None
@@ -535,9 +527,7 @@ class Branch:
                     
                     # find a variable
                     match = gvarre.fullmatch(out)
-                    if VERBOSE > 2: print(out)
                     if match:
-                        if VERBOSE > 1: print("Match found!")
                         oii = ii
                         ii = len(outputs)
                         break;
@@ -548,31 +538,27 @@ class Branch:
 
             # no matches in any of the outputs, break
             if not match:
-                if VERBOSE > 1: print("No Matches found!")
                 break
 
             pref = match.group(1)
             vname = match.group(2)
             suff = match.group(3)
-            if VERBOSE > 3: print("Match: %s" %  vname)
             if vname not in gvars:
                 print("Error! Unknown global variable reference: %s" % vv)
                 return None 
 
-            if VERBOSE > 1: print("Replacing %s" % vname)
             subre = re.compile('\${\s*'+vname+'\s*}')
  
             # we already have a value for this, just use that
             if vname in valreal[oii]:
                 vv = valreal[oii][vname]
-                if VERBOSE > 2: print("Previous match: %s" , vname)
-                if VERBOSE > 4: print(outputs[oii])
 
                 # perform replacement in all the gvars 
                 for ojj in range(len(outputs[oii])):
                     outputs[oii][ojj] = subre.sub(vv, outputs[oii][ojj])
 
-                if VERBOSE > 4: print(outputs[oii])
+                # restart expansion process in case of references in the 
+                # expanded value
                 continue
 
             # no previous match, go ahead and expand
@@ -595,10 +581,6 @@ class Branch:
                 
                 outputs.append(newouts)
                 valreal.append(newvar)
-                if VERBOSE > 3: print("%s, %s, %s" % (vv, newouts, newvar))
-
-
-            if VERBOSE > 2: print(outputs)
 
         # now that we have expanded the outputs, just need to expand input
         # and create a ring to store each realization of the expansion process
@@ -607,8 +589,6 @@ class Branch:
 
             # fill in variable values from outputs
             for inval in self.inputs:
-                if VERBOSE > 1: print("inval: %s" % inval)
-                
                 invals = [inval]
                 
                 # the expanded version (for instance if there are multi-value)
@@ -647,7 +627,6 @@ class Branch:
                             return None
                         
                     else:
-                        if VERBOSE > 1: print("expanded inval: %s" % tmp)
                         final_invals.append(tmp)
             
                 # insert finalized invals into curins 
@@ -657,15 +636,12 @@ class Branch:
             # pass them in as a list to the new ring
             
             # change curins to list of Files, instead of strings
-            print(curins)
             for ingrp in curins:
                 for ii, name in enumerate(ingrp):
                     if name in gfiles:
                         ingrp[ii] = gfiles[name]
                     else:
                         # since the file doesn't exist yet, create as placeholder
-                        print(name)
-                        print(cache)
                         ingrp[ii] = File(name, gremotes, cache, remote)
                         gfiles[name] = ingrp[ii]
 
@@ -678,10 +654,9 @@ class Branch:
                     gfiles[name] = curouts[ii]
 
             # append ring to list of rings
-            oring = Ring(curins, curouts)
+            oring = Ring(curins, curouts, self)
+            if VERBOSE > 2: print("New Ring:%s"% str(oring))
             
-            if VERBOSE > 0: print(str(oring))
-
             # append ring to list of rings
             rings.append(oring)
 
@@ -689,7 +664,7 @@ class Branch:
         return rings 
 
     def __str__(self):
-        tmp = str(self.uuid) + "\n"
+        tmp = "Branch"
         for cc in self.cmds:
             tmp = tmp + ("\tCommand: %s\n" % cc)
         tmp = tmp + ("\tInputs: %s\n" % self.inputs)
@@ -713,10 +688,12 @@ class Ring:
     outputs = list() #list of output files (File)
     cmd = "" 
     updated = True  # when updated leave set until next run
+    parent = None
 
-    def __init__(self, inputs, outputs):
+    def __init__(self, inputs, outputs, parent = None):
         self.inputs = inputs
         self.outputs = outputs
+        self.parent = parent
 
         # make ourself the generator for the outputs
         for ff in self.outputs:
@@ -740,7 +717,22 @@ class Ring:
 
     def __str__(self):
         out = "Ring\n"
-        out = out + "Inputs: " + str(self.inputs) + "\n"
-        out = out + "Outputs: " + str(self.outputs) + "\n"
+        out = out + "\tParent:\n" 
+
+        for cc in self.parent.cmds:
+            out = out + ("\t\tCommand: %s\n" % cc)
+        out = out + ("\t\tInputs: %s\n" % self.parent.inputs)
+        out = out + ("\t\tOutputs: %s\n" % self.parent.outputs)
+
+        out = out + "\tInputs: "
+        count = 0
+        for ii in self.inputs:
+            out = out + "\n\t\tInput #" + str(count)
+            for jj in ii:
+                out = out + "\n\t\t\t" + str(jj)
+        out = out + "\n\tOutputs:"
+        for ii in self.outputs:
+            out = out + "\n\t\t\t" + str(ii)
+        out = out + '\n'
         out = out + "Updated: " + str(self.updated) + "\n"
         return out

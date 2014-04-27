@@ -80,6 +80,18 @@ class Remote:
     def rcopy(self, remote1, remote2):
         print("get")
 
+    def __str__(self):
+        out = ""
+        if self.username:
+            out = out + self.username + "@"
+        if self.hostname:
+            out = out + self.hostname
+        if self.port:
+            out = out + ":" + str(self.port)
+
+        return out
+
+
 #class File:
 #    cachename = ""
 #    cachesig = ""

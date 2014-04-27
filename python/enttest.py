@@ -15,8 +15,7 @@ def main(args):
     if ret != 0:
         return ret 
 
-    entobj.dumpJobs()
-    entobj.pushCache()
+    print("Done Parsing")
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
