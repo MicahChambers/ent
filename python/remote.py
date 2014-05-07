@@ -17,17 +17,17 @@ class Remote:
         self.port = port
 
     def start(self, others = [], pw = None):
-        if client:
+        if self.client:
             return
         
-        print("Username: %s\nHostname: %s\nport: %i" % (username, hostname, port))
+        print("Username: %s\nHostname: %s\nport: %i" % (self.username, self.hostname, self.port))
         
         self.client = paramiko.SSHClient()
         self.client.load_system_host_keys()
 
         if pw:
             try:
-                self.client.connect(hostname, port, username, pw)
+                self.client.connect(self.hostname, self.port, self.username, pw)
             except Exception as inst:
                 print(type(inst))    # the exception instance
                 print(inst.args)     # arguments stored in .args
@@ -36,8 +36,8 @@ class Remote:
         else:
             # try without password
             try:
-                self.client.connect(hostname, port, username)
-            except PasswordRequiredException:
+                self.client.connect(self.hostname, self.port, self.username)
+            except paramiko.ssh_exception.PasswordRequiredException:
                 # ask for password, to minimize the number of password 
                 # re-entries, try the password on all the other passed
                 # connections
@@ -48,7 +48,7 @@ class Remote:
                 
                 # now try on ourself
                 try:
-                    self.client.connect(hostname, port, username, pw)
+                    self.client.connect(self.hostname, self.port, self.username, pw)
                 except Exception as inst:
                     print(type(inst))    # the exception instance
                     print(inst.args)     # arguments stored in .args
@@ -60,6 +60,8 @@ class Remote:
                 print(inst.args)     # arguments stored in .args
                 print(inst)         
                 self.client.close()
+
+        print("Connected")
 
     def __exit__(self, type, value, traceback):
         self.clientt.close()

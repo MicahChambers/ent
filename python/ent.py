@@ -71,6 +71,16 @@ class Ent:
         for filename, fileobj in self.files.items():
             fileobj.pushCache(self.remotes)
 
+    def connect(self):
+        tmp = [v for v in self.remotes.values()]
+        tmp[0].start(others=tmp) 
+
+    def run(self):
+        """ Batch up all the jobs and generate a list of jobs that can be
+        run simultaneously as a group"""
+
+        for rr in self.rings:
+            rr.run()
 
     def batch(self):
         """ Batch up all the jobs and generate a list of jobs that can be
@@ -470,9 +480,21 @@ class File:
         print("FinalHost: %s Finalpath: %s" %(self.finalhost, self.finalpath))
         
     def __str__(self):
-        cache="Cache: %s %s %s," %(self.cachehost,self.cachepath,self.cmtime)
-        main="Main: %s %s %s" %(self.finalhost,self.finalpath,self.fmtime)
-        return cache + main
+        cache="Cache: "
+        if self.cachehost:
+            cache=cache+str(self.cachehost)+"/"
+        cache=cache+self.cachepath
+        if self.cmtime:
+            cache=cache+"("+self.cmtime+")"
+        
+        main="Main: "
+        if self.finalhost:
+            main=main+str(self.finalhost)+"/"
+        main=main+self.finalpath
+        if self.cmtime:
+            main=main+"("+self.fmtime+")"
+
+        return cache + "    " + main
 
 ###############################################################################
 # Branch Class
@@ -687,7 +709,7 @@ class Ring:
     inputs = list() #list of list of input files   (File)
     outputs = list() #list of output files (File)
     cmd = "" 
-    updated = True  # when updated leave set until next run
+    uptodate = True  # when updated leave set until next run
     parent = None
 
     def __init__(self, inputs, outputs, parent = None):
@@ -711,10 +733,34 @@ class Ring:
     def batch(self):
         print("Batch Ring: %s" % self)
 
+    def prerun(self):
+        """ 
+        Make cmd string, and cache all the inputs 
+        """
+    
+    def postrun(self):
+        """ 
+        For any output files, copy the output files from the cache to final
+        """
 
-    def run(self):
-        print("Run Ring: %s" % self)
+    def run(self, globgen, trail):
+        nextjobs = []
+        if self.uptodate:
+            return nextjobs
+        else:
+            # run the generators for all the inputs
+            for ii in self.inputs:
+                globgen[ii].run(trail = trail)
 
+            # run the job
+            # todo
+            
+            # make the outputs out of date
+            nextjobs = [globgen[oo] for oo in self.outputs]
+            for nn in nextjobs:
+                nn.uptodate = False
+            return nextjobs
+            
     def __str__(self):
         out = "Ring\n"
         out = out + "\tParent:\n" 
@@ -734,5 +780,5 @@ class Ring:
         for ii in self.outputs:
             out = out + "\n\t\t\t" + str(ii)
         out = out + '\n'
-        out = out + "Updated: " + str(self.updated) + "\n"
+        out = out + "Updated: " + str(self.uptodate) + "\n"
         return out

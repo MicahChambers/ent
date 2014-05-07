@@ -1,4 +1,4 @@
-.REMOTE=ssh://ssh.bmap.ucla.edu/ifs/students/mchambers/test/
+.REMOTE=ssh://mchamber@ssh.bmap.ucla.edu/ifs/students/mchambers/test/
 
 # you could also do
 #.REMOTE = ssh://ssh.bmap.ucla.edu
