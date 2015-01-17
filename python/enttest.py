@@ -17,11 +17,11 @@ def main(args):
 
     print("Done Parsing")
 
-    # open connections
-    entobj.connect()
-
+##    # open connections
+##    entobj.connect()
+##
     # submit jobs
-    entobj.run()
+    entobj.simulate()
 
 
 if __name__ == "__main__":

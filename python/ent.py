@@ -1,11 +1,19 @@
 import os, time
 import re
-import uuid
-import hashlib
 import copy
+import sys 
 
-from remote import Remote
-        
+"""
+Main Data Structures:
+    Ent: Parser and Global Class
+
+    Ring: Hold a concrete set of Command Line Arguments, input and output files
+
+    Branch: Generator of Rings
+
+    File: Holds a file name knowns which ring generates it
+"""
+
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=10
 
@@ -37,17 +45,112 @@ class InputError(Exception):
         self.expr = expr
         self.msg = msg
 
+##
+# @brief Parses a string with ${VARNAME} type syntax with the contents of
+# defs. If a variable contains more variable those are resolved as well. 
+# Special definitions:
+# ${<} replaced with all inputs
+# ${<N} where N is >= 0, replaced the the N'th input
+# ${>} replaced with all outputs
+# ${>N} where N is >= 0, replaced the the N'th output
+# ${*SEP*VARNAME} 
+#
+# @param inputs List of Files
+# @param outputs List of List of Files
+# @param defs Global variables to check
+#
+# @return 
+def expand(string, inputs, outputs, defs):
+    # $> - 0 - all outputs
+    # $< - 1 - all inputs
+    # ${>#} - 2 - output number outputs
+    # ${<#} - 3 - output number outputs
+    # ${*SEP*VARNAME} - 4,5 - expand VARNAME, separating them by SEP
+    # ${VARNAME} - 6 - expand varname
+
+    allout  = "(\$>|\${>})|"
+    allin   = "(\$<|\${<})|"
+    singout = "\${>\s*([0-9]*)}|"
+    singin  = "\${<\s*([0-9]*)}|"
+    sepvar  = "\${\*([^*]*)\*([^}]*)}|"
+    regvar  = "\${([^}]*)}"
+    r = re.compile(allout+allin+singout+singin+sepvar+regvar)
+    
+    ## Convert Inputs Outputs to Strings
+    inputs = [f.finalpath for f in inputs]
+    outputs = [f.finalpath for f in outputs]
+
+    ostring = string
+    m = r.search(ostring)
+    ii = 0
+    while m != None:
+        ii += 1
+        # perform lookup
+        if m.group(1):
+            # all out
+            insert = " ".join(outputs)
+        elif m.group(2):
+            # all in
+            insert = " ".join(inputs)
+        elif m.group(3):
+            # singout
+            i = int(m.group(3))
+            if i < 0 or i >= len(outputs):
+                raise InputError("expand", "Error Resolving Output number "
+                        "%i in\n%s" % (i, string))
+            insert = outputs[i]
+        elif m.group(4):
+            # singin 
+            i = int(m.group(4))
+            if i < 0 or i >= len(inputs):
+                raise InputError("expand", "Error Resolving input number "
+                        "%i in\n%s" % (i, string))
+            insert = inputs[i]
+        elif m.group(5) and m.group(6):
+            # sepvar
+            k = str(m.group(6))
+            if k not in defs:
+                raise InputError("expand", "Error Resolving Variable "
+                        "%s in\n%s" % (k, string))
+            if type(defs[k]) == type([]):
+                insert = m.group(5).join(defs[k])
+            else:
+                insert = m.group(5)+m.group(6)
+        elif m.group(7):
+            # var
+            k = str(m.group(7))
+            if k not in defs:
+                raise InputError("expand", "Error Resolving Variable "
+                        "%s in\n%s" % (k, string))
+            if type(defs[k]) == type([]):
+                insert = " ".join(defs[k])
+            else:
+                insert = defs[k]
+        
+        ostring = ostring[:m.start()] + insert + ostring[m.end():]
+        m = r.search(ostring)
+        if ii == 100:
+            raise InputError("Circular Variable References Detected!")
+
+    return string
+
 ###############################################################################
 # Ent Class
 ###############################################################################
 class Ent:
     """ Main Ent Class, all others are derived from this. This stores global 
     variables, all jobs, all files etc.
+
+    Organization:
+    Branch: This is a generic rule of how a particular set of inputs generates
+    a particular set of outputs. 
+
+    Ring: This is a concrete command to be run
+
     """
     error = 0
     files = dict()   # filename -> File
     variables = dict() # varname -> list of values
-    remotes = dict() # user@host:port -> Remote
     rings = list()
     branches = list()
 
@@ -64,23 +167,6 @@ class Ent:
 
     def dumpJobs(self):
         pass
-
-#TODO HERE
-    def pushCache(self):
-        """ Copy files to cache, in preparation for running jobs """
-        for filename, fileobj in self.files.items():
-            fileobj.pushCache(self.remotes)
-
-    def connect(self):
-        tmp = [v for v in self.remotes.values()]
-        tmp[0].start(others=tmp) 
-
-    def run(self):
-        """ Batch up all the jobs and generate a list of jobs that can be
-        run simultaneously as a group"""
-
-        for rr in self.rings:
-            rr.run()
 
     def batch(self):
         """ Batch up all the jobs and generate a list of jobs that can be
@@ -223,26 +309,30 @@ class Ent:
         lineno=0
         fullline = ""
         cbranch = None
-        
+
+        ## Clean Input
+        # Merge Lines that end in \ and remove trailing white space:
+        buff = []
+        tmp = ""
         for line in lines:
-            # remove endlines
-            line = line.rstrip("\n")
-
-            # remove comments
-            match = commentre.search(line)
-            if match:
-                line = match.group(1)
-
-            # check for continuation
-            lineno = lineno + 1
-            fullline = fullline + line
-            if len(line) > 0 and line[-1] == '\\':
-                fullline = fullline[0:-1]
-                continue
+            if line[-2:] == "\\\n":
+                tmp += line[:-2]
+            elif line[-3:] == "\\\r\n":
+                tmp += line[:-3]
+            else:
+                buff.append(tmp+line.rstrip())
+                tmp = ""
+        lines = buff
+        
+        # Remove comments
+        for ii in range(len(lines)):
             
-            # no continuation, so elminated fullline
-            line = fullline
-            fullline = ""
+            # remove comments
+            match = commentre.search(lines[ii])
+            if match:
+                lines[ii] = match.group(1)
+
+        for line in lines:
             if VERBOSE > 4: print("line %i:\n%s" % (lineno, line))
 
             # if there is a current branch we are working
@@ -266,6 +356,8 @@ class Ent:
                 # expand inputs/outputs
                 inputs = re.split("\s+", iomatch.group(2))
                 outputs = re.split("\s+", iomatch.group(1))
+                inputs = [s for s in inputs if len(s) > 0]
+                outputs = [s for s in outputs if len(s) > 0]
 
                 # create a new branch
                 cbranch = Branch(inputs, outputs)
@@ -282,32 +374,13 @@ class Ent:
             else:
                 continue
 
-        # Get the REMOTE and CACHEDIR
-        # make sure they are single values
-        remote = self.variables.pop(".REMOTE", None)
-        cachedir = self.variables.pop(".CACHEDIR", None)
-        if remote != None:
-            if len(remote) != 1:
-                print("Error, invalid .REMOTE: %s" % remote)
-                return -1
-            else:
-                remote = remote[0]
-        
-        if cachedir != None:
-            if len(cachedir) != 1:
-                print("Error, invalid .REMOTE: %s" % cachedir)
-                return -1
-            else:
-                cachedir = cachedir[0]
-
         if VERBOSE > 3: print("Done With Initial Pass!")
 
         # now go ahead and expand all the branches into rings
         for bb in self.branches:
 
             # get rings and files this generates
-            rlist = bb.genRings(self.files, self.variables, 
-                    self.remotes, cachedir, remote)
+            rlist = bb.genRings(self.files, self.variables)
 
             if rlist == None:
                 return -1
@@ -317,28 +390,54 @@ class Ent:
             
         return 0
 
+    def simulate(self):
+
+        outqueue = []
+        changed = False
+        rqueue = self.rings
+        while len(rqueue) > 0:
+            curlen = len(rqueue) 
+            
+            done = []
+            for i, ring in enumerate(rqueue):
+                try:
+                    cmds = ring.simulate(self.variables)
+                    outqueue.extend(cmds)
+                    done.append(i)
+                except InputError:
+                    pass
+
+            # In the Real Runner we will also have to check weather there
+            # are processes that are waiting
+            if len(done) > 0:
+                done.reverse()
+                for i in done:
+                    del(rqueue[i])
+            else:
+                print("Error The Following Rings of UnResolved Dependencies!")
+                for rr in rqueue:
+                    print(rr)
+                raise InputError("Unresolved Dependencies")
+
+        for cmd in outqueue:
+            print(cmd)
+
 ###############################################################################
 # File Class
 ###############################################################################
 class File:
-    """ Keeps track of a particular files metdata. Obviously this includes a
-    path, but also keeps track of whether the file has been updated since the
-    last run. """
+    """ 
+    Keeps track of a particular files metdata. All jobs processes are wrapped
+    in an md5 check, which returns success if it matches the previous value 
+    """
 
-    cachehost = None  # server that cache is on (must be same as processor)
-    cachepath = ""  # path in the cache to use, usually a variant of finalpath 
-    finalhost = None  # server that final is on
     finalpath = ""  # final path to use for input/output
-    cmtime = None # previous cache mtime, modification time of cache file
-    fmtime = None # previous final mtime, modification time of final file
+    force = ""      # force update of file even if file exists with the same md5
+    genr = None     # pointer to the ring which generates the file
+    users = []      # List of Downstream rings that need this file
+    finished = False
 
-    genr = None   # pointer to the ring which generates the file
-    users = []
-
-    # state variables
-    mtime = None    # modification time
-
-    def __init__(self, path, remotes, cachedir = None, remote = None):
+    def __init__(self, path):
         """ Constructor for File class. 
 
         Parameters
@@ -346,162 +445,39 @@ class File:
         path : string
             the input/output file path that may be on the local machine or on 
             any remote server
-        remotes : (modified) dict
-            dict of uri -> connection classes. If a new connection has to be
-            opened for the file, the connection will be added here
-        cache: string, optional
-            base directory where cache file should be. If this is provided then
-            the cachepath will be remote+this+path. If not provided then cachepath
-            will be remote+finalpath.
-        remote: string, optional 
-            where processing will be performed. If not set then it will be 
-            the local machine. If it is set then cachehost will be set to this
         """
         
-        ###################
-        # Final (Output/Input) Setup
-        ###################
-        
-        # if no cachedir specified, then assume its the same as path
-        if not cachedir:
-            cachedir=path
+        self.finalpath = path
+        self.finished = False
 
-        # parse the input string
-        fproto, fuser, fhost, fport, fpath = parseURI(path)
-
-        # go ahead and set finalpath
-        self.finalpath = fpath
-
-        # if there is a host then see if we are already created, otherwise
-        # create the Remote
-        if fhost:
-            tmp = fuser + "@" + fhost + ":" + fport
-            if tmp in remotes:
-                self.finalhost = remotes[tmp]
-            else:
-                self.finalhost = Remote(fuser, fhost, fport)
-                remotes[tmp] = self.finalhost
-        else:
-            # just assume its local
-            self.finalhost = None
-       
-        ###################
-        # Cache Setup
-        ###################
-        
-        # parse remote
-        if remote:
-            rproto, ruser, rhost, rport, rpath = parseURI(remote)
-        
-        # parse cachedir
-        if cachedir:
-            cproto, cuser, chost, cport, cpath = parseURI(cachedir)
-            self.cachepath = os.path.join(cpath, self.finalpath)
-
-            # check that chost, 
-            #   if set, matches remote, 
-            #   if not set , just set the chost to remote
-            if chost or rhost:
-                if not chost and remote:
-                    cuser = ruser
-                    chost = rhost
-                    cport = rport
-                elif chost and not remote:
-                    raise InputError(str(cachedir)+","+str(remote), "Error! "\
-                            "Remote  cache specified, but non-remote processing"\
-                            " is specified")
-                elif rhost != chost or rport != cport or ruser != cuser:
-                    raise InputError(str(cachedir)+","+str(remote), "Error! "\
-                            "Remote cache specified but it doesn't match the "\
-                            "remote processing node")
-
-                # make a name for the chost
-                tmp = ""
-                if cuser:
-                    tmp = cuser + "@"
-                tmp = tmp + chost
-                if cport:
-                    tmp = tmp + ":" + str(cport)
-
-                if tmp in remotes:
-                    self.cachehost = remotes[tmp]
-                else:
-                    self.cachehost = Remote(cuser, chost, cport)
-                    remotes[tmp] = self.cachehost
-            else:
-                # just local
-                self.cachehost = None
-        else:
-            # no cachedir, just set to finalpath
-            self.cachepath = self.finalpath
-
+        # Should be Updated By Ring
+        self.genr = None 
         self.users = []
-
-    def updateTime(self):
-        try:
-            #(mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime)
-            ftup = os.stat(self.abspath)
-            self.mtime = ftup[8]
-            print("last modified: %s" % self.mtime)
-            return 0
-        except FileNotFoundError:
-            print("File doesn't exist!\n%s" % self.abspath)
-            return -1 
-        except PermissionError:
-            print("Don't have permissions to access:\n%s" % self.abspath)
-
-    # check if the file is up-to-date
-    def ready(self):
-        if self.genr != None and self.genr.updated:
-            return False
-
-        try:
-            ftup = os.stat(self.abspath)
-            mtime = ftup[8]
-        except FileNotFoundError:
-            # doesn't exist, not ready
-            return False
-
-        # file is out of date 
-        if self.mtime != mtime:
-            return False
-
-        return True
-
+        
     # does whatever is necessary to produce this file
-    def makeready(self):
-        if self.ready():
-            return 0
-        else:
+    def produce(self):
+        if self.finished: 
+            return True
+        elif self.genr:
             return self.genr.run()
+        else:
+            raise InputError(self.finalpath, "No Branch Creates File")
 
-    def pushCache(self, gremotes):
-        print("Cachehost: %s Cachepath: %s" %(self.cachehost, self.cachepath))
-        print("FinalHost: %s Finalpath: %s" %(self.finalhost, self.finalpath))
-        
     def __str__(self):
-        cache="Cache: "
-        if self.cachehost:
-            cache=cache+str(self.cachehost)+"/"
-        cache=cache+self.cachepath
-        if self.cmtime:
-            cache=cache+"("+self.cmtime+")"
-        
-        main="Main: "
-        if self.finalhost:
-            main=main+str(self.finalhost)+"/"
-        main=main+self.finalpath
-        if self.cmtime:
-            main=main+"("+self.fmtime+")"
-
-        return cache + "    " + main
+        if self.finished:
+            return self.finalpath + " (done) "
+        else:
+            return self.finalpath + " (incomplete) "
 
 ###############################################################################
 # Branch Class
 ###############################################################################
 class Branch:
-    """ A branch is a job that has not been split up into rings (which are the
-    actual jobs with resolved filenames"""
+    """ 
+    A branch is a job that has not been split up into rings (which are the
+    actual jobs with resolved filenames). Thus each Branch may have any number
+    of jobs associated with it.
+    """
 
     cmds = list()
     inputs = list()
@@ -512,7 +488,7 @@ class Branch:
         self.inputs = inputs
         self.outputs = outputs
 
-    def genRings(self, gfiles, gvars, gremotes, cache = None, remote = None):
+    def genRings(self, gfiles, gvars):
         """ The "main" function of Branch is genRings. It produces a list of 
         rings (which are specific jobs with specific inputs and outputs)
         and updates files with any newly refernenced files. May need global
@@ -524,20 +500,22 @@ class Branch:
             global dictionary of files, will be updated with any new files found
         gvars : dict {varname: [value...] }
             global variables used to look up values
-        gremotes: (modified) dict, { "user@host:port" : Remote }
-            remote servers that we may access, lazily connect. We add new servers
-            we find referenced
-        remote: string (optional)
-            remote processing server (defualt for cachedir).
-            ssh://user@host:port/base/path/
         
         """
         
         # produce all the rings from inputs/outputs
         rings = list()
-        outputs = [self.outputs]
-        valreal = [dict()]
+        
+        # store array of REAL output paths
+        outputs = [self.outputs] 
 
+        # store array of dictionaries that produced output paths, so that the
+        # same variables to be reused for inputs
+        valreal = [dict()] 
+
+        # First Expand All Variables in outputs, for instance if there is a
+        # variable in the output and the variable referrs to an array, that
+        # produces mulitiple outputs
         while True:
             # outer list realization of set of outputs (list)
             prevout = outputs
@@ -566,8 +544,8 @@ class Branch:
             vname = match.group(2)
             suff = match.group(3)
             if vname not in gvars:
-                print("Error! Unknown global variable reference: %s" % vv)
-                return None 
+                raise InputError("genRings", "Error! Unknown global variable "
+                        "reference: %s" % vv)
 
             subre = re.compile('\${\s*'+vname+'\s*}')
  
@@ -609,7 +587,7 @@ class Branch:
         for curouts, curvars in zip(outputs, valreal):
             curins = []
 
-            # fill in variable values from outputs
+            # for each input, fill in variable values from outputs
             for inval in self.inputs:
                 invals = [inval]
                 
@@ -631,7 +609,7 @@ class Branch:
                         elif name in gvars:
                             # if it is a global variable, then we don't have a 
                             # value from output, if there are multiple values
-                            # then it is a compount (multivalue) input
+                            # then it is a compound (multivalue) input
                             realvals = gvars[name]
                             if len(realvals) == 1:
                                 tmp = pref + realvals[0] + suff
@@ -652,31 +630,31 @@ class Branch:
                         final_invals.append(tmp)
             
                 # insert finalized invals into curins 
-                curins.append(final_invals)
+                curins.extend(final_invals)
 
             # find inputs and outputs in the global files database, and then
             # pass them in as a list to the new ring
             
             # change curins to list of Files, instead of strings
-            for ingrp in curins:
-                for ii, name in enumerate(ingrp):
-                    if name in gfiles:
-                        ingrp[ii] = gfiles[name]
-                    else:
-                        # since the file doesn't exist yet, create as placeholder
-                        ingrp[ii] = File(name, gremotes, cache, remote)
-                        gfiles[name] = ingrp[ii]
+            print(curins)
+            for ii, name in enumerate(curins):
+                if name in gfiles:
+                    curins[ii] = gfiles[name]
+                else:
+                    # since the file doesn't exist yet, create as placeholder
+                    curins[ii] = File(name)
+                    gfiles[name] = curins[ii]
 
             # find outputs (checking for double-producing is done in Ring, below)
             for ii, name in enumerate(curouts):
                 if name in gfiles:
                     curouts[ii] = gfiles[name]
                 else:
-                    curouts[ii] = File(name, gremotes, cache, remote)
+                    curouts[ii] = File(name)
                     gfiles[name] = curouts[ii]
 
             # append ring to list of rings
-            oring = Ring(curins, curouts, self)
+            oring = Ring(curins, curouts, self.cmds, self)
             if VERBOSE > 2: print("New Ring:%s"% str(oring))
             
             # append ring to list of rings
@@ -706,16 +684,16 @@ class Ring:
     # subj = 1 2 3
     # /ello : /hello/${subj} /world
     # inputs = [[/hello/1,/hello/2,/hello/3],[/world]]
-    inputs = list() #list of list of input files   (File)
+    inputs = list() #list of input files   (File)
     outputs = list() #list of output files (File)
-    cmd = "" 
-    uptodate = True  # when updated leave set until next run
+    cmds = []
     parent = None
 
-    def __init__(self, inputs, outputs, parent = None):
+    def __init__(self, inputs, outputs, cmds, parent = None):
         self.inputs = inputs
         self.outputs = outputs
         self.parent = parent
+        self.cmds = cmds
 
         # make ourself the generator for the outputs
         for ff in self.outputs:
@@ -726,59 +704,55 @@ class Ring:
 
         # add ourself to the list of users of the inputs
         for igrp in self.inputs:
-            for ff in igrp:
-                ff.users.append(self)
-
-    # TODO instead of run, just prepare batches
-    def batch(self):
-        print("Batch Ring: %s" % self)
-
-    def prerun(self):
-        """ 
-        Make cmd string, and cache all the inputs 
-        """
-    
-    def postrun(self):
-        """ 
-        For any output files, copy the output files from the cache to final
-        """
-
+            ff.users.append(self)
+        
     def run(self, globgen, trail):
-        nextjobs = []
-        if self.uptodate:
-            return nextjobs
-        else:
-            # run the generators for all the inputs
-            for ii in self.inputs:
-                globgen[ii].run(trail = trail)
+        print("RUN")
+ 
+    def simulate(self, globvars):
+        # Check if all the inputs are ready
+        ready = True
+        for infile in self.inputs:
+           if not infile.finished:
+               ready = False
+               break
 
-            # run the job
-            # todo
+        if ready:
+            cmds = []
+            for cmd in self.cmds:
+                try:
+                    cmd = " ".join(re.split("\s+", cmd))
+                    cmd = expand(cmd, self.inputs, self.outputs, globvars)
+                except InputError as e:
+                    print("While Expanding Command %s" % cmd)
+                    print(e.msg)
+                    sys.exit(-1)
+                cmds.append(cmd)
             
-            # make the outputs out of date
-            nextjobs = [globgen[oo] for oo in self.outputs]
-            for nn in nextjobs:
-                nn.uptodate = False
-            return nextjobs
+            for out in self.outputs:
+                out.finished = True
+            return cmds
+        else:
+            raise InputError("Ring: "+str(this)+" not yet ready")
             
+
+
     def __str__(self):
         out = "Ring\n"
         out = out + "\tParent:\n" 
 
-        for cc in self.parent.cmds:
-            out = out + ("\t\tCommand: %s\n" % cc)
-        out = out + ("\t\tInputs: %s\n" % self.parent.inputs)
-        out = out + ("\t\tOutputs: %s\n" % self.parent.outputs)
+        if self.parent:
+            for cc in self.parent.cmds:
+                out = out + ("\t\tCommand: %s\n" % cc)
+            out = out + ("\t\tInputs: %s\n" % self.parent.inputs)
+            out = out + ("\t\tOutputs: %s\n" % self.parent.outputs)
 
         out = out + "\tInputs: "
         count = 0
         for ii in self.inputs:
-            out = out + "\n\t\tInput #" + str(count)
-            for jj in ii:
-                out = out + "\n\t\t\t" + str(jj)
+            out = out + "\n\t\t\t" + str(ii)
         out = out + "\n\tOutputs:"
         for ii in self.outputs:
             out = out + "\n\t\t\t" + str(ii)
         out = out + '\n'
-        out = out + "Updated: " + str(self.uptodate) + "\n"
         return out

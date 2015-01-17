@@ -23,6 +23,8 @@ SUBJECT=sub04097 sub08723 sub14692 sub18955 sub24781 sub29425 sub35020  \
 FMRIB=${BASE}/${SUBJECT}/func/rest
 T1B=${BASE}/${SUBJECT}/anat/mprage_anonymized
 
+${T1B}.nii.gz ${FMRIB}.nii.gz:
+
 ${FMRIB}_bcl.nii.gz: ${FMRIB}.nii.gz
 	${NPLDIR}/imgSimpleSegment -m pthresh -i $< -o $>
 
@@ -46,5 +48,5 @@ ${FMRIB}_dc.nii.gz ${FMRIB}_field.nii.gz ${FMRIB}_mc.nii.gz ${FMRIB}_motion.txt:
 	${NPLDIR}/fIDistortionCorrect -i ${<0} -s ${<1} -o ${>0} -f ${>1} ${SINGLE} \
 				-D 3 -d ${DIST} --mc-only ${<2} --motion ${< 3} -a ${ALPHA} \
 				-j ${ALPHA_JAC} --bd-iters ${ITERS} --bd-lbfgs-hist ${HIST} \
-	 			--opttype ${OPT} ${-S *SMOOTH} --bd-bins ${BINS} --bd-kern-rad ${KERN} \
+	 			--opttype ${OPT} ${*-S|SMOOTH} --bd-bins ${BINS} --bd-kern-rad ${KERN} \
 	 			--bd-gstop ${GSTOP} --bd-fstop ${FSTOP}
