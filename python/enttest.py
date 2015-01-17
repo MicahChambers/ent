@@ -8,14 +8,9 @@ def main(args):
     entobj = ent.Ent(os.getcwd())
 
     if len(args) > 0:
-        ret = entobj.parseV1(args[0])
+        entobj.load(args[0])
     else:
-        ret = entobj.parseV1("ENTFILE")
-
-    if ret != 0:
-        return ret 
-
-    print("Done Parsing")
+        entobj.load("ENTFILE")
 
 ##    # open connections
 ##    entobj.connect()

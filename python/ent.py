@@ -1,7 +1,7 @@
 import os, time
 import re
 import copy
-import sys 
+import sys
 
 """
 Main Data Structures:
@@ -34,32 +34,126 @@ def parseURI(uri):
     rpath = rmatch.group(5)
     return (proto,ruser, rhost, rport, rpath)
 
+
+def parseV1(filename):
+    """Reads a file and returns branchs, and variables as a tuple
+
+    Variable names may be [a-zA-Z0-9_]*
+    Variable values may be anything but white space, multiple values may
+    be separated by white space
+
+    """
+    iomre = re.compile("\s*([^:]*?)\s*:(?!//)\s*(.*?)\s*")
+    varre = re.compile("\s*([a-zA-Z0-9_.]*)\s*=\s*(.*?)\s*")
+    cmdre = re.compile("\t\s*(.*?)\s*")
+    commentre = re.compile("(.*?)#.*")
+
+    with open(filename, "r") as f:
+        lines = f.readlines()
+
+    lineno=0
+    fullline = ""
+    cbranch = None
+
+    # Outputs
+    branches = []
+    variables = dict()
+
+    ## Clean Input
+    # Merge Lines that end in \ and remove trailing white space:
+    buff = []
+    tmp = ""
+    for line in lines:
+        if line[-2:] == "\\\n":
+            tmp += line[:-2]
+        elif line[-3:] == "\\\r\n":
+            tmp += line[:-3]
+        else:
+            buff.append(tmp+line.rstrip())
+            tmp = ""
+    lines = buff
+
+    # Remove comments
+    for ii in range(len(lines)):
+
+        # remove comments
+        match = commentre.search(lines[ii])
+        if match:
+            lines[ii] = match.group(1)
+
+    for line in lines:
+        if VERBOSE > 4: print("line %i:\n%s" % (lineno, line))
+
+        # if there is a current branch we are working
+        # the first try to append commands to it
+        if cbranch:
+            cmdmatch = cmdre.fullmatch(line)
+            if cmdmatch:
+                # append the extra command to the branch
+                cbranch.cmds.append(cmdmatch.group(1))
+                continue
+            else:
+                # done with current branch, remove current link
+                branches.append(cbranch)
+                if VERBOSE > 0: print("Adding branch: %s" % cbranch)
+                cbranch = None
+
+        # if this isn't a command, try the other possibilities
+        iomatch = iomre.fullmatch(line)
+        varmatch = varre.fullmatch(line)
+        if iomatch:
+            # expand inputs/outputs
+            inputs = re.split("\s+", iomatch.group(2))
+            outputs = re.split("\s+", iomatch.group(1))
+            inputs = [s for s in inputs if len(s) > 0]
+            outputs = [s for s in outputs if len(s) > 0]
+
+            # create a new branch
+            cbranch = Branch(inputs, outputs)
+            if VERBOSE > 3: print("New Branch: %s:%s" % (inputs, outputs))
+        elif varmatch:
+            # split variables
+            name = varmatch.group(1)
+            values = re.split("\s+", varmatch.group(2))
+            if name in variables:
+                print("Error! Redefined variable: %s" % name)
+                return (None, None)
+            if VERBOSE > 3: print("Defining: %s = %s"%(name, str(values)))
+            variables[name] = values
+        else:
+            continue
+
+    if VERBOSE > 3: print("Done With Initial Pass!")
+
+    return (branches, variables)
+
+
 class InputError(Exception):
     """Exception raised for errors in the input.
        Attributes:
        expr -- input expression in which the error occurred
        msg  -- explanation of the error
     """
-                                    
+
     def __init__(self, expr, msg):
         self.expr = expr
         self.msg = msg
 
 ##
 # @brief Parses a string with ${VARNAME} type syntax with the contents of
-# defs. If a variable contains more variable those are resolved as well. 
+# defs. If a variable contains more variable those are resolved as well.
 # Special definitions:
 # ${<} replaced with all inputs
 # ${<N} where N is >= 0, replaced the the N'th input
 # ${>} replaced with all outputs
 # ${>N} where N is >= 0, replaced the the N'th output
-# ${*SEP*VARNAME} 
+# ${*SEP*VARNAME}
 #
 # @param inputs List of Files
 # @param outputs List of List of Files
 # @param defs Global variables to check
 #
-# @return 
+# @return
 def expand(string, inputs, outputs, defs):
     # $> - 0 - all outputs
     # $< - 1 - all inputs
@@ -75,7 +169,7 @@ def expand(string, inputs, outputs, defs):
     sepvar  = "\${\*([^*]*)\*([^}]*)}|"
     regvar  = "\${([^}]*)}"
     r = re.compile(allout+allin+singout+singin+sepvar+regvar)
-    
+
     ## Convert Inputs Outputs to Strings
     inputs = [f.finalpath for f in inputs]
     outputs = [f.finalpath for f in outputs]
@@ -100,7 +194,7 @@ def expand(string, inputs, outputs, defs):
                         "%i in\n%s" % (i, string))
             insert = outputs[i]
         elif m.group(4):
-            # singin 
+            # singin
             i = int(m.group(4))
             if i < 0 or i >= len(inputs):
                 raise InputError("expand", "Error Resolving input number "
@@ -126,24 +220,24 @@ def expand(string, inputs, outputs, defs):
                 insert = " ".join(defs[k])
             else:
                 insert = defs[k]
-        
+
         ostring = ostring[:m.start()] + insert + ostring[m.end():]
         m = r.search(ostring)
         if ii == 100:
             raise InputError("Circular Variable References Detected!")
 
-    return string
+    return ostring
 
 ###############################################################################
 # Ent Class
 ###############################################################################
 class Ent:
-    """ Main Ent Class, all others are derived from this. This stores global 
+    """ Main Ent Class, all others are derived from this. This stores global
     variables, all jobs, all files etc.
 
     Organization:
     Branch: This is a generic rule of how a particular set of inputs generates
-    a particular set of outputs. 
+    a particular set of outputs.
 
     Ring: This is a concrete command to be run
 
@@ -152,260 +246,63 @@ class Ent:
     files = dict()   # filename -> File
     variables = dict() # varname -> list of values
     rings = list()
-    branches = list()
 
-    def __init__(self, working):
+    def __init__(self, working, entfile = None):
         """ Ent Constructor """
         self.error = 0
         self.files = dict()
         self.variables = dict()
         self.rings = list()
-        self.branches = list()
 
         # initialize special variables
         self.variables[".PWD"] = [working]
 
-    def dumpJobs(self):
-        pass
+        # load the file
+        if entfile:
+            load(entfile)
 
-    def batch(self):
-        """ Batch up all the jobs and generate a list of jobs that can be
-        run simultaneously as a group"""
+    def load(self, entfile):
+        branches, self.variables = parseV1(entfile)
+        if not branches or not self.variables:
+            raise "Error Parsing input file %s" % entfile
 
-        fexist = set() # files that exist
-        fronts = []
-
-        queue = [rr for rr in self.rings]
-        change = True 
-
-        while len(queue) > 0 and change:
-            # add any jobs that can be run to the current front
-            print("Files created: %s " % fexist)
-            front = []
-            newexist = set()
-            for rr in range(len(queue)):
-                ready = True
-                # check to see if all the inputs exist
-                for ii in queue[rr].inputs:
-                    if ii not in fexist:
-                        print("%s doesn't exist yet" % ii)
-                        ready = False
-                        break
-
-                # if its ready add to current front, add output
-                # to list of done 
-                if ready:
-                    newexist.update(queue[rr].outputs)
-                    front.append(queue[rr])
-                    queue[rr] = None
-                    change = True
-
-            # done with current pass of queue, remove elements and 
-            # add new exist files to fexist
-            fexist.update(newexist)
-            fronts.append(front)
-            queue = [qq for qq in queue if qq != None];
-
-        if len(queue) > 0:
-            print("Error, jobs exist without a way to generate their inputs")
-            return -1
-
-        for ff in fronts:
-            for rr in ff:
-                print(rr.cmd)
-
-    def run(self):
-        """ Start the jobs """
-        for rr in self.rings:
-            rr.run()
-
-    def setuptodate(self, filename):
-        """ Reads a history file. Determines which files are 
-        up to date, and which need to be updated.
-        
-        """ 
-        
-        # set all as out-of-date
-        for fn, fclass in self.files.items():
-            fclass.uptodate = False
-
-        fhist = [()]
-        
-        # for each history file, check whether cache is out of date
-        for fn in fhist:
-
-            if fn.path in self.files:
-                fclass = self.files[fn.path]
-                cachef = join(self.cachedir, fclass.abspath)
-                outf = fclass.abspath
-
-                if fn.md5 == md5(cachef):
-                    # cache file up to date
-                    fclass.uptodate = True
-                elif fn.md5 == md5(outf):
-                    # cache not up to date, but out is
-                    copy(source = outf, target = cachef)
-                    fclass.uptodate = True
-        
-        # find all the generator-less inputs and make them uptodate by copying
-        for fn, fclass in self.files.items():
-
-            if fclass.genr == None and not fclass.uptodate:
-                cachef = join(self.cachedir, fclass.abspath)
-                outf = fclass.abspath
-                copy(source = outf, target = cachef)
-
-                fclass.uptodate = True
-
-        # propagate uptodate status
-        queue = [fclass for fclass in self.files.values() if not fclass.uptodate]
-        while len(queue) > 0:
-            fclass = queue.pop()
-            
-            # if not up to date, make all the children no up to date, and 
-            # add to queue
-            if not fclass.uptodate:
-                # user is a ring that uses this as an input
-                for user in fclass.users:
-
-                    # child is an output from the given user ring
-                    for child in user.outputs:
-                        if fclass not in child.inputs:
-                            return -1
-
-                        # only enqueue if it hadn't been fixed yet
-                        # prevents loops
-                        if child.uptodate:
-                            child.uptodate = False
-                            queue.append(child)
-        
-        # alright everything should be up to date
-        return 0
-
-    def parseV1(self, filename):
-        """Reads a file and makes modification to Ent class to incorporate
-        the read files. This populates 
-
-        self.files      - all inputs or outputs, dict of name->File
-        self.rings      - jobs with specific inputs and outputs
-        self.branches   - jobs prior to resolution
-        self.variables  - global variables
-
-        Variable names may be [a-zA-Z0-9_]*
-        Variable values may be anything but white space, multiple values may
-        be separated by white space
-
-        """
-        iomre = re.compile("\s*([^:]*?)\s*:(?!//)\s*(.*?)\s*")
-        varre = re.compile("\s*([a-zA-Z0-9_.]*)\s*=\s*(.*?)\s*")
-        cmdre = re.compile("\t\s*(.*?)\s*")
-        commentre = re.compile("(.*?)#.*")
-
-        with open(filename, "r") as f:
-            lines = f.readlines()
-        
-        # so that any remaining branches get cleared
-        lines.append("")
-        lineno=0
-        fullline = ""
-        cbranch = None
-
-        ## Clean Input
-        # Merge Lines that end in \ and remove trailing white space:
-        buff = []
-        tmp = ""
-        for line in lines:
-            if line[-2:] == "\\\n":
-                tmp += line[:-2]
-            elif line[-3:] == "\\\r\n":
-                tmp += line[:-3]
-            else:
-                buff.append(tmp+line.rstrip())
-                tmp = ""
-        lines = buff
-        
-        # Remove comments
-        for ii in range(len(lines)):
-            
-            # remove comments
-            match = commentre.search(lines[ii])
-            if match:
-                lines[ii] = match.group(1)
-
-        for line in lines:
-            if VERBOSE > 4: print("line %i:\n%s" % (lineno, line))
-
-            # if there is a current branch we are working
-            # the first try to append commands to it
-            if cbranch:
-                cmdmatch = cmdre.fullmatch(line)
-                if cmdmatch:
-                    # append the extra command to the branch
-                    cbranch.cmds.append(cmdmatch.group(1))
-                    continue
-                else:
-                    # done with current branch, remove current link
-                    self.branches.append(cbranch)
-                    if VERBOSE > 0: print("Adding branch: %s" % cbranch)
-                    cbranch = None
-            
-            # if this isn't a command, try the other possibilities
-            iomatch = iomre.fullmatch(line)
-            varmatch = varre.fullmatch(line)
-            if iomatch:
-                # expand inputs/outputs
-                inputs = re.split("\s+", iomatch.group(2))
-                outputs = re.split("\s+", iomatch.group(1))
-                inputs = [s for s in inputs if len(s) > 0]
-                outputs = [s for s in outputs if len(s) > 0]
-
-                # create a new branch
-                cbranch = Branch(inputs, outputs)
-                if VERBOSE > 3: print("New Branch: %s:%s" % (inputs, outputs))
-            elif varmatch:
-                # split variables
-                name = varmatch.group(1)
-                values = re.split("\s+", varmatch.group(2))
-                if name in self.variables:
-                    print("Error! Redefined variable: %s" % name)
-                    return -1
-                if VERBOSE > 3: print("Defining: %s = %s"%(name, str(values)))
-                self.variables[name] = values
-            else:
-                continue
-
-        if VERBOSE > 3: print("Done With Initial Pass!")
-
-        # now go ahead and expand all the branches into rings
-        for bb in self.branches:
-
+        # expand all the branches into rings
+        for bb in branches:
             # get rings and files this generates
             rlist = bb.genRings(self.files, self.variables)
-
             if rlist == None:
                 return -1
-
             # add rings to list of rings
             self.rings.extend(rlist)
-            
-        return 0
 
     def simulate(self):
+        # Identify Files without Generators
+        rootfiles = []
+        for k,v in self.files.items():
+            if v.genr == None:
+                v.finished = True
+                rootfiles.append(k)
+
+        # Inform the user
+        print("The Following Files Must Exist in the Filesystem:")
+        for f in rootfiles:
+            print(f)
 
         outqueue = []
         changed = False
         rqueue = self.rings
         while len(rqueue) > 0:
-            curlen = len(rqueue) 
-            
+            curlen = len(rqueue)
+            thispass = []
             done = []
             for i, ring in enumerate(rqueue):
                 try:
                     cmds = ring.simulate(self.variables)
-                    outqueue.extend(cmds)
+                    thispass.append(" &&".join(cmds))
                     done.append(i)
                 except InputError:
                     pass
+            outqueue.extend(thispass)
 
             # In the Real Runner we will also have to check weather there
             # are processes that are waiting
@@ -419,16 +316,17 @@ class Ent:
                     print(rr)
                 raise InputError("Unresolved Dependencies")
 
-        for cmd in outqueue:
-            print(cmd)
+        print("Jobs to Run")
+        for q in outqueue:
+            print(q)
 
 ###############################################################################
 # File Class
 ###############################################################################
 class File:
-    """ 
+    """
     Keeps track of a particular files metdata. All jobs processes are wrapped
-    in an md5 check, which returns success if it matches the previous value 
+    in an md5 check, which returns success if it matches the previous value
     """
 
     finalpath = ""  # final path to use for input/output
@@ -438,25 +336,25 @@ class File:
     finished = False
 
     def __init__(self, path):
-        """ Constructor for File class. 
+        """ Constructor for File class.
 
         Parameters
         ----------
         path : string
-            the input/output file path that may be on the local machine or on 
+            the input/output file path that may be on the local machine or on
             any remote server
         """
-        
+
         self.finalpath = path
         self.finished = False
 
         # Should be Updated By Ring
-        self.genr = None 
+        self.genr = None
         self.users = []
-        
+
     # does whatever is necessary to produce this file
     def produce(self):
-        if self.finished: 
+        if self.finished:
             return True
         elif self.genr:
             return self.genr.run()
@@ -473,7 +371,7 @@ class File:
 # Branch Class
 ###############################################################################
 class Branch:
-    """ 
+    """
     A branch is a job that has not been split up into rings (which are the
     actual jobs with resolved filenames). Thus each Branch may have any number
     of jobs associated with it.
@@ -489,29 +387,29 @@ class Branch:
         self.outputs = outputs
 
     def genRings(self, gfiles, gvars):
-        """ The "main" function of Branch is genRings. It produces a list of 
+        """ The "main" function of Branch is genRings. It produces a list of
         rings (which are specific jobs with specific inputs and outputs)
         and updates files with any newly refernenced files. May need global
         gvars to resolve file names.
-        
+
         Parameters
         ----------
-        gfiles : (modified) dict, {filename: File} 
+        gfiles : (modified) dict, {filename: File}
             global dictionary of files, will be updated with any new files found
         gvars : dict {varname: [value...] }
             global variables used to look up values
-        
+
         """
-        
+
         # produce all the rings from inputs/outputs
         rings = list()
-        
+
         # store array of REAL output paths
-        outputs = [self.outputs] 
+        outputs = [self.outputs]
 
         # store array of dictionaries that produced output paths, so that the
         # same variables to be reused for inputs
-        valreal = [dict()] 
+        valreal = [dict()]
 
         # First Expand All Variables in outputs, for instance if there is a
         # variable in the output and the variable referrs to an array, that
@@ -524,7 +422,7 @@ class Branch:
             ii = 0
             for outs in outputs:
                 for out in outs:
-                    
+
                     # find a variable
                     match = gvarre.fullmatch(out)
                     if match:
@@ -545,25 +443,25 @@ class Branch:
             suff = match.group(3)
             if vname not in gvars:
                 raise InputError("genRings", "Error! Unknown global variable "
-                        "reference: %s" % vv)
+                        "reference: %s" % vname)
 
             subre = re.compile('\${\s*'+vname+'\s*}')
- 
+
             # we already have a value for this, just use that
             if vname in valreal[oii]:
                 vv = valreal[oii][vname]
 
-                # perform replacement in all the gvars 
+                # perform replacement in all the gvars
                 for ojj in range(len(outputs[oii])):
                     outputs[oii][ojj] = subre.sub(vv, outputs[oii][ojj])
 
-                # restart expansion process in case of references in the 
+                # restart expansion process in case of references in the
                 # expanded value
                 continue
 
             # no previous match, go ahead and expand
             values = gvars[vname]
-            
+
             # save and remove matching realization
             outs = outputs[oii]
             del outputs[oii]
@@ -575,10 +473,10 @@ class Branch:
                 newvar = copy.deepcopy(varprev)
                 newvar[vname] = vv
 
-                # perform replacement in all the gvars 
+                # perform replacement in all the gvars
                 for out in outs:
                     newouts.append(subre.sub(vv, out))
-                
+
                 outputs.append(newouts)
                 valreal.append(newvar)
 
@@ -590,10 +488,10 @@ class Branch:
             # for each input, fill in variable values from outputs
             for inval in self.inputs:
                 invals = [inval]
-                
+
                 # the expanded version (for instance if there are multi-value)
                 # arguments
-                final_invals = [] 
+                final_invals = []
                 while len(invals) > 0:
                     tmp = invals.pop()
                     match = gvarre.fullmatch(tmp)
@@ -603,11 +501,11 @@ class Branch:
                         suff = match.group(3)
 
                         # resolve variable name
-                        if name in curvars: 
+                        if name in curvars:
                             # variable in the list of output vars, just sub in
                             invals.append(pref + curvars[name] + suff)
                         elif name in gvars:
-                            # if it is a global variable, then we don't have a 
+                            # if it is a global variable, then we don't have a
                             # value from output, if there are multiple values
                             # then it is a compound (multivalue) input
                             realvals = gvars[name]
@@ -615,26 +513,26 @@ class Branch:
                                 tmp = pref + realvals[0] + suff
                                 invals.append(tmp)
                             else:
-                                # multiple values, insert in reverse order, 
-                                # to make first value in list first to be 
+                                # multiple values, insert in reverse order,
+                                # to make first value in list first to be
                                 # resolved in next iteration
-                                tmp = [pref + vv + suff for vv in 
+                                tmp = [pref + vv + suff for vv in
                                         reversed(realvals)]
                                 invals.extend(tmp)
                         else:
                             print('Error, input "%s" references variable "%s"'\
                                     'which is a unknown!' % (inval, name))
                             return None
-                        
+
                     else:
                         final_invals.append(tmp)
-            
-                # insert finalized invals into curins 
+
+                # insert finalized invals into curins
                 curins.extend(final_invals)
 
             # find inputs and outputs in the global files database, and then
             # pass them in as a list to the new ring
-            
+
             # change curins to list of Files, instead of strings
             print(curins)
             for ii, name in enumerate(curins):
@@ -656,12 +554,12 @@ class Branch:
             # append ring to list of rings
             oring = Ring(curins, curouts, self.cmds, self)
             if VERBOSE > 2: print("New Ring:%s"% str(oring))
-            
+
             # append ring to list of rings
             rings.append(oring)
 
         # find external files referenced as inputs
-        return rings 
+        return rings
 
     def __str__(self):
         tmp = "Branch"
@@ -677,9 +575,9 @@ class Branch:
 class Ring:
     """ A job with a concrete set of inputs and outputs """
 
-    # inputs are nested so that outer values refer to 
+    # inputs are nested so that outer values refer to
     # values specified in the command [0] [1] : [0] [1]
-    # and inner refer to any expanded values due to the 
+    # and inner refer to any expanded values due to the
     # referred values above actually including lists ie:
     # subj = 1 2 3
     # /ello : /hello/${subj} /world
@@ -693,7 +591,11 @@ class Ring:
         self.inputs = inputs
         self.outputs = outputs
         self.parent = parent
-        self.cmds = cmds
+
+        if "".join(cmds) != "":
+            self.cmds = cmds
+        else:
+            self.cmds = []
 
         # make ourself the generator for the outputs
         for ff in self.outputs:
@@ -705,10 +607,10 @@ class Ring:
         # add ourself to the list of users of the inputs
         for igrp in self.inputs:
             ff.users.append(self)
-        
+
     def run(self, globgen, trail):
         print("RUN")
- 
+
     def simulate(self, globvars):
         # Check if all the inputs are ready
         ready = True
@@ -728,18 +630,18 @@ class Ring:
                     print(e.msg)
                     sys.exit(-1)
                 cmds.append(cmd)
-            
+
             for out in self.outputs:
                 out.finished = True
             return cmds
         else:
-            raise InputError("Ring: "+str(this)+" not yet ready")
-            
+            raise InputError("Ring: "+str(self)+" not yet ready")
+
 
 
     def __str__(self):
         out = "Ring\n"
-        out = out + "\tParent:\n" 
+        out = out + "\tParent:\n"
 
         if self.parent:
             for cc in self.parent.cmds:
