@@ -16,7 +16,8 @@ def main(args):
 ##    entobj.connect()
 ##
     # submit jobs
-    entobj.simulate()
+#    entobj.simulate()
+    entobj.submit("localhost", 12345)
 
 
 if __name__ == "__main__":

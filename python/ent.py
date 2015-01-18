@@ -2,6 +2,8 @@ import os, time
 import re
 import copy
 import sys
+import asyncore
+import json
 
 """
 Main Data Structures:
@@ -12,10 +14,77 @@ Main Data Structures:
     Branch: Generator of Rings
 
     File: Holds a file name knowns which ring generates it
+
+    Requestor
 """
 
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=10
+
+class EntCommunicator(asynchat.async_chat):
+    """Sends messages to the server to determine currently running process
+    status.
+    """
+    def __init__(self, host, port):
+        self.received_data = []
+        self.logger = logging.getLogger('EntCommunicator')
+        asynchat.async_chat.__init__(self)
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.logger.debug('connecting to %s', (host, port))
+        self.connect((host, port))
+        self.response = {}
+
+    def handle_connect(self):
+        self.logger.debug('handle_connect()')
+        self.set_terminator(b'\n')
+
+    def collect_incoming_data(self, data):
+        """Read an incoming message from the server"""
+        self.logger.debug('collect_incoming_data() -> (%d)\n"""%s"""', len(data), data)
+        self.received_data.append(data)
+
+    def found_terminator(self):
+        self.logger.debug('found_terminator()')
+        received_message = ''.join([bstr.decode("utf-8") for bstr in self.received_data])
+        received_message = json.loads(received_message)
+        self.response = dict(list(self.response.items()) + list(received_message.items()))
+        self.waitfor -= 1
+        if self.waitfor == 0:
+            self.close()
+
+    def sendrecieve(self, reqlist):
+        if type(reqlist) != type([]):
+            reqlist = [reqlist]
+
+        self.waitfor = 0
+        for req in reqlist:
+            req = req.strip()
+            if len(req) == 0:
+                continue
+            comm.push(bytearray(req+'\n', 'utf-8'))
+            self.waitfor += 1
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format='%(name)s: %(message)s',)
+    host = 'localhost'
+    port = 12345
+    try:
+        host = sys.argv[1]
+        port = int(sys.argv[2])
+    except:
+        pass
+
+    try:
+        comm = EntCommunicator(host, port)
+    except Exception as e:
+        print("Error:", e)
+        sys.exit(-1)
+
+    comm.sendrecieve(['USER micahc', 'USER root'])
+    asyncore.loop()
+    print(comm.response)
+    sys.exit(0)
 
 def parseURI(uri):
     urire = re.compile("^\s*(ssh)://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)"\
@@ -274,6 +343,17 @@ class Ent:
                 return -1
             # add rings to list of rings
             self.rings.extend(rlist)
+
+    def submit(self, host, port):
+        # Serialize Rings and Send to Requestor
+        req = json.dumps([{"commands":ring.serialize(self.variables),
+            "inputs": [f.finalpath for f in ring.inputs],
+            "outputs": [f.finalpath for f in ring.outputs]}
+            for ring in self.rings])
+
+        # create listener that updates status
+        client = Requestor(host, port, req)
+        asyncore.loop()
 
     def simulate(self):
         # Identify Files without Generators
@@ -608,8 +688,19 @@ class Ring:
         for igrp in self.inputs:
             ff.users.append(self)
 
-    def run(self, globgen, trail):
-        print("RUN")
+    def serialize(self, globvars):
+        cmds = []
+        for cmd in self.cmds:
+            try:
+                cmd = " ".join(re.split("\s+", cmd))
+                cmd = expand(cmd, self.inputs, self.outputs, globvars)
+            except InputError as e:
+                print("While Expanding Command %s" % cmd)
+                print(e.msg)
+                sys.exit(-1)
+            cmds.append(cmd)
+
+        return cmds
 
     def simulate(self, globvars):
         # Check if all the inputs are ready
