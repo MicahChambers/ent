@@ -1,9 +1,17 @@
+import asyncore
+import asynchat
+import logging
+import socket
 import os, time
 import re
 import copy
 import sys
 import asyncore
+import asynchat
 import json
+import hashlib
+import subprocess
+from pathlib import Path
 
 """
 Main Data Structures:
@@ -16,27 +24,64 @@ Main Data Structures:
     File: Holds a file name knowns which ring generates it
 
     Requestor
+
+    TODO Enforce 1 line per rule (or handle multi-line rules)
 """
 
+md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 VERBOSE=10
 
+def md5sum(fname):
+    out = subprocess.check_output(['md5sum', fname])
+    m = md5re.match(out.decode('utf-8'))
+    if m and not m.group(3):
+        return m.group(1)
+    else:
+        return None
+
+def submit(cmd, name):
+    # TODO check upstream to see if job already exists with same name
+    print("Sumitting")
+    print(cmd)
+    proc = subprocess.Popen(cmd)
+    return proc.pid
+
+class InputError(Exception):
+    """Exception raised for errors in the input.
+       Attributes:
+       expr -- input expression in which the error occurred
+       msg  -- explanation of the error
+    """
+
+    def __init__(self, expr, msg):
+        self.expr = expr
+        self.msg = msg
+
 class EntCommunicator(asynchat.async_chat):
-    """Sends messages to the server to determine currently running process
-    status.
+    """
+    Requests information from EntMoot on currently running jobs. May eventually
+    add information about filesystem as well.
+
+    Usage:
+    comm = EntCommunicator(host,port)
+    jobinfo = comm.openSyncRW(['USER username'])
+    jobinfo = comm.openSyncRW(['USER username username ...'])
+    jobinfo = comm.openSyncRW(['PID pid'])
+    jobinfo = comm.openSyncRW(['PID pid pid pid pid ... '])
+    jobinfo = comm.openSyncRW(['PID pid pid pid pid ... ', 'USER username username'])
     """
     def __init__(self, host, port):
         self.received_data = []
         self.logger = logging.getLogger('EntCommunicator')
         asynchat.async_chat.__init__(self)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.logger.debug('connecting to %s', (host, port))
-        self.connect((host, port))
-        self.response = {}
+        self.host = host
+        self.port = port
 
     def handle_connect(self):
         self.logger.debug('handle_connect()')
-        self.set_terminator(b'\n')
+        self.set_terminator(b'\n\n')
 
     def collect_incoming_data(self, data):
         """Read an incoming message from the server"""
@@ -46,63 +91,34 @@ class EntCommunicator(asynchat.async_chat):
     def found_terminator(self):
         self.logger.debug('found_terminator()')
         received_message = ''.join([bstr.decode("utf-8") for bstr in self.received_data])
-        received_message = json.loads(received_message)
-        self.response = dict(list(self.response.items()) + list(received_message.items()))
-        self.waitfor -= 1
-        if self.waitfor == 0:
-            self.close()
+        self.response = json.loads(received_message)
+        self.close()
 
-    def sendrecieve(self, reqlist):
+    def openSyncRW(self, reqlist):
+        self.logger.debug('connecting to %s', (self.host, self.port))
+        self.connect((self.host, self.port))
+        self.response = {}
+
+        ## Connect
+        self.logger.debug('connecting to %s', self.host+':'+str(self.port))
+        self.connect((self.host, self.port))
+
+        # Convert String To List
         if type(reqlist) != type([]):
             reqlist = [reqlist]
 
-        self.waitfor = 0
+        # Push All the Requests
         for req in reqlist:
             req = req.strip()
             if len(req) == 0:
                 continue
-            comm.push(bytearray(req+'\n', 'utf-8'))
-            self.waitfor += 1
+            self.logger.debug('Sending Request: %s' % req)
+            self.push(bytearray(req+'\n', 'utf-8'))
+        self.push(b'\n')
 
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, format='%(name)s: %(message)s',)
-    host = 'localhost'
-    port = 12345
-    try:
-        host = sys.argv[1]
-        port = int(sys.argv[2])
-    except:
-        pass
-
-    try:
-        comm = EntCommunicator(host, port)
-    except Exception as e:
-        print("Error:", e)
-        sys.exit(-1)
-
-    comm.sendrecieve(['USER micahc', 'USER root'])
-    asyncore.loop()
-    print(comm.response)
-    sys.exit(0)
-
-def parseURI(uri):
-    urire = re.compile("^\s*(ssh)://(?:([a-z_][a-z0-9_]{0,30})@)?([a-zA-Z.-]*)"\
-            "(?:([0-9]+))?(/.*)?")
-    rmatch = urire.search(uri)
-    if not rmatch:
-        return (None, None, None, None, uri)
-
-    proto = rmatch.group(1)
-    ruser = rmatch.group(2)
-    rhost = rmatch.group(3)
-    if rmatch.group(4):
-        rport = int(rmatch.group(4))
-    else:
-        rport = 22
-    rpath = rmatch.group(5)
-    return (proto,ruser, rhost, rport, rpath)
-
+        tmpmap = {}
+        asyncore.loop(map=tmpmap)
+        return self.response
 
 def parseV1(filename):
     """Reads a file and returns branchs, and variables as a tuple
@@ -126,7 +142,7 @@ def parseV1(filename):
 
     # Outputs
     branches = []
-    variables = dict()
+    variables = {'.PWD' : os.getcwd()}
 
     ## Clean Input
     # Merge Lines that end in \ and remove trailing white space:
@@ -197,17 +213,6 @@ def parseV1(filename):
     return (branches, variables)
 
 
-class InputError(Exception):
-    """Exception raised for errors in the input.
-       Attributes:
-       expr -- input expression in which the error occurred
-       msg  -- explanation of the error
-    """
-
-    def __init__(self, expr, msg):
-        self.expr = expr
-        self.msg = msg
-
 ##
 # @brief Parses a string with ${VARNAME} type syntax with the contents of
 # defs. If a variable contains more variable those are resolved as well.
@@ -240,8 +245,8 @@ def expand(string, inputs, outputs, defs):
     r = re.compile(allout+allin+singout+singin+sepvar+regvar)
 
     ## Convert Inputs Outputs to Strings
-    inputs = [f.finalpath for f in inputs]
-    outputs = [f.finalpath for f in outputs]
+    inputs = [f.path for f in inputs]
+    outputs = [f.path for f in outputs]
 
     ostring = string
     m = r.search(ostring)
@@ -316,19 +321,18 @@ class Ent:
     variables = dict() # varname -> list of values
     rings = list()
 
-    def __init__(self, working, entfile = None):
+    def __init__(self, host, port, entfile = None):
         """ Ent Constructor """
         self.error = 0
         self.files = dict()
-        self.variables = dict()
+        self.variables = {'.PWD' : os.getcwd()}
         self.rings = list()
-
-        # initialize special variables
-        self.variables[".PWD"] = [working]
+        self.usetime = True
+        self.comm = EntCommunicator(host,port)
 
         # load the file
         if entfile:
-            load(entfile)
+            self.load(entfile)
 
     def load(self, entfile):
         branches, self.variables = parseV1(entfile)
@@ -344,16 +348,80 @@ class Ent:
             # add rings to list of rings
             self.rings.extend(rlist)
 
-    def submit(self, host, port):
-        # Serialize Rings and Send to Requestor
-        req = json.dumps([{"commands":ring.serialize(self.variables),
-            "inputs": [f.finalpath for f in ring.inputs],
-            "outputs": [f.finalpath for f in ring.outputs]}
-            for ring in self.rings])
+    def loadstate(self, fname):
+        """
+        Loads a file of modification times
+        """
+        with open(fname, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            m = modre.match(line)
+            if m and m.group(2) in self.files:
+                self.files[m.group(2)].modtime = int(m.group(1))
 
-        # create listener that updates status
-        client = Requestor(host, port, req)
-        asyncore.loop()
+    def submit(self):
+        for f in self.files.values():
+            p = Path(f.path)
+            if not p.exists():
+                f.finished = False
+            elif p.is_dir():
+                try:
+                    p.mkdir(parents=True)
+                except FileExistsError:
+                    pass
+                f.finished = True
+            elif f.md5sum == md5sum(f.path):
+                # no existing md5sum
+                f.finished = True
+            else:
+                f.finished = False
+
+        unmet = []
+        for f in self.files.values():
+            if f.finished:
+                print("Using Existing: %s" % f.path)
+            elif f.genr:
+                print("Generating: %s" % f.path)
+            else:
+                print("The following file does not have a generator")
+                print(f)
+                return -1
+
+        ### Start Running Jobs ###
+        outqueue = []
+        rqueue = self.rings
+        watching = []
+        while len(rqueue) > 0:
+            for i, ring in enumerate(rqueue):
+                try:
+                    cmds = ring.getcmd(self.variables)
+
+                    hasher = hashlib.md5()
+                    hasher.update(repr(cmds).encode('utf-8'))
+                    for f in ring.inputs:
+                        if f.md5sum:
+                            hasher.update(repr(f.md5sum).encode('utf-8'))
+
+                    watching.append(submit(cmds, cmds[0][0:5]+hasher.hexdigest()))
+                except InputError:
+                    pass
+
+            # Check On Watching Processes
+            jobinfo = self.comm.openSyncRW('PID '+' '.join([w for w in str(watching)]))
+            print("Job Info:\n%s\n" % str(jobinfo))
+
+            # To Do Find a Way to determine whethe jobs FAIL
+            for w in watching:
+                if w not in jobinfo
+            if len(done) > 0:
+                done.reverse()
+                for i in done:
+                    del(rqueue[i])
+            else:
+                print("Error The Following Rings of UnResolved Dependencies!")
+                for rr in rqueue:
+                    print(rr)
+                raise InputError("Unresolved Dependencies")
 
     def simulate(self):
         # Identify Files without Generators
@@ -369,10 +437,8 @@ class Ent:
             print(f)
 
         outqueue = []
-        changed = False
         rqueue = self.rings
         while len(rqueue) > 0:
-            curlen = len(rqueue)
             thispass = []
             done = []
             for i, ring in enumerate(rqueue):
@@ -409,8 +475,9 @@ class File:
     in an md5 check, which returns success if it matches the previous value
     """
 
-    finalpath = ""  # final path to use for input/output
+    path = ""  # final path to use for input/output
     force = ""      # force update of file even if file exists with the same md5
+    md5sum = 0      # md5sum
     genr = None     # pointer to the ring which generates the file
     users = []      # List of Downstream rings that need this file
     finished = False
@@ -425,7 +492,7 @@ class File:
             any remote server
         """
 
-        self.finalpath = path
+        self.path = path
         self.finished = False
 
         # Should be Updated By Ring
@@ -439,13 +506,13 @@ class File:
         elif self.genr:
             return self.genr.run()
         else:
-            raise InputError(self.finalpath, "No Branch Creates File")
+            raise InputError(self.path, "No Branch Creates File")
 
     def __str__(self):
         if self.finished:
-            return self.finalpath + " (done) "
+            return self.path + " (done) "
         else:
-            return self.finalpath + " (incomplete) "
+            return self.path + " (incomplete) "
 
 ###############################################################################
 # Branch Class
@@ -680,7 +747,7 @@ class Ring:
         # make ourself the generator for the outputs
         for ff in self.outputs:
             if ff.genr:
-                raise InputError(ff.finalpath, "Error! Generator already given")
+                raise InputError(ff.path, "Error! Generator already given")
             else:
                 ff.genr = self
 
@@ -688,19 +755,33 @@ class Ring:
         for igrp in self.inputs:
             ff.users.append(self)
 
-    def serialize(self, globvars):
-        cmds = []
+    def getcmd(self, globvars):
+        fullcmd = []
+        first = True
+        print(self)
+        if not self.cmds:
+            print("Error no command for %s\n"%self)
+            raise InputError("getcmd", "Missing command!")
+
         for cmd in self.cmds:
+            print(cmd)
             try:
+                print(cmd)
                 cmd = " ".join(re.split("\s+", cmd))
+                print(cmd)
                 cmd = expand(cmd, self.inputs, self.outputs, globvars)
+                if not first:
+                    fullcmd.append('&&')
+                print(cmd)
+                print(fullcmd)
+                fullcmd.extend(re.split("\s+", cmd))
+                print(fullcmd)
             except InputError as e:
                 print("While Expanding Command %s" % cmd)
                 print(e.msg)
                 sys.exit(-1)
-            cmds.append(cmd)
 
-        return cmds
+        return fullcmd
 
     def simulate(self, globvars):
         # Check if all the inputs are ready

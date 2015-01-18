@@ -14,7 +14,7 @@ DIST=15
 BINS=250
 KERN=6
 
-NPLDIR=/ifs/students/mchambers/npl-latest/bin/
+CP=/usr/bin/cp
 BFIT=/ifs/students/mchambers/brainsfit/BRAINSFit
 
 BASE=/ifs/faculty/shattuck/micahc/thousand_connectomes

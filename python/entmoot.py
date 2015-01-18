@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import sys
+import os
 import asyncore
 import logging
 import json
@@ -78,7 +79,7 @@ class EntMootCommunicator(asynchat.async_chat):
         self.received_data = []
         self.logger = logging.getLogger('EntMoot')
         asynchat.async_chat.__init__(self, sock)
-        self.set_terminator(b'\n')
+        self.set_terminator(b'\n\n')
         return
 
     def collect_incoming_data(self, data):
@@ -89,13 +90,9 @@ class EntMootCommunicator(asynchat.async_chat):
     def found_terminator(self):
         """The end of a command or message has been seen."""
         self.logger.debug('found_terminator()')
-        self.process_data()
 
-    def process_data(self):
-        """We have the full command"""
-        self.logger.debug('_process_command()')
-        print(self.received_data)
-        cmd = ''.join([bstr.decode("utf-8") for bstr in self.received_data])
+        # Convert and Remove Received Data
+        msg = ''.join([bstr.decode("utf-8") for bstr in self.received_data])
         self.received_data = []
 
         # Load database to full response
@@ -103,24 +100,30 @@ class EntMootCommunicator(asynchat.async_chat):
 
         # Fill Output Buffer with response
         outputbuffer = []
-        cmd = cmd.split(' ')
 
-        response = dict()
-        if cmd[0] == 'USER':
-            # Look Up User
-            for c in cmd[1:]:
-                if c and c in database:
-                    for pid, data in database[c].items():
-                        response[pid] = data
+        # TODO Better Splitting
+        response = {'USER':{}, 'PID':{}}
+        for line in msg.split('\n'):
+            cmd = line.split(' ')
+            if cmd[0] == 'USER':
+                # Look Up User
+                for c in cmd[1:]:
+                    if c and c in database:
+                        for pid, data in database[c].items():
+                            response['USER'][pid] = data
 
-        elif cmd[0] == 'PID':
-            # Look Up PID
-            for c in cmd[1:]:
-                print(c)
-                if c and c in database:
-                    response[c] = database[c]
+            elif cmd[0] == 'PID':
+                # Look Up PID
+                for c in cmd[1:]:
+                    if c and c in database:
+                        response['PID'][c] = database[c]
 
-        response = json.dumps(response)+'\n'
+#            elif cmd[0] == 'FILE':
+#                ### Note Files are 1 per line
+#                fname = ' '.join(cmd[1:])
+#                response['FILE'][fname] = os.stat(fname).st_mtime_ns
+
+        response = json.dumps(response)+'\n\n'
         self.logger.debug('response: %s' % response)
         self.push(bytearray(response, 'utf-8'))
 

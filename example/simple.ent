@@ -1,33 +1,43 @@
-.REMOTE=ssh://mchamber@ssh.bmap.ucla.edu/ifs/students/mchambers/test/
+BASE=/tmp/data/
 
-# you could also do
-#.REMOTE = ssh://ssh.bmap.ucla.edu
-#.CACHEDIR = /ifs/students/mchambers/test/
+#SUBJ =	10588 10659 10844 1103 1395 14298 15440 16051 1688 174 17614 1850 \
+#		20207 20242 22670 2367 23713 27014 27641 28652 31866 32282 3886 4265 \
+#		5778 6041 6645 7390 7866 9809
+SUBJ =	10588 10659 10844
 
-BASE=${.PWD}/data/
-.SEEDFILE=${BASE}/.seed
+MAKESCRIPT = ${.PWD}/createfile.sh
+JOINSCRIPT = ${.PWD}/join.sh
 
-SUBJ =	10588 10659 10844 1103 1395 14298 15440 16051 1688 174 17614 1850 \
-		20207 20242 22670 2367 23713 27014 27641 28652 31866 32282 3886 4265 \
-		5778 6041 6645 7390 7866 9809
-RUN = 1 2 3 4
+ALLFUNC = ${BASE}/func/
+ALLSTRUCT = ${BASE}/struct/
 
-FBASE = ${BASE}/${SUBJ}/func/
-SBASE = ${BASE}/${SUBJ}/struct/
+SUBDIR = ${BASE}/${SUBJ}/
+SUBFUNC = ${SUBDIR}/func
+SUBSTRUCT = ${SUBDIR}/struct
 
+${SUBDIR} ${SUBFUNC} ${SUBSTRUCT} :
+	mkdir -p $>
 
-# reverse all the t1's for each subject
-${SBASE}/t1rev.txt : ${SBASE}/t1.txt
-	tac ${<0} > ${>0}
+${ALLFUNC} ${ALLSTRUCT}:
+	mkdir -p $>
 
-# reverse all the runs
-${FBASE}/run_${RUN}_rev.txt: ${FBASE}/run_${RUN}.txt
-	tac ${<0} > ${>0}
+${SUBFUNC}/subfunc.txt: ${SUBFUNC}
+	${MAKESCRIPT} $> '${SUBJ} func'
 
-# concatinate runs within each subject
-${FBASE}/run_all.txt: ${FBASE}/run_${RUN}.txt
-	tac $< > ${>0}
+${SUBSTRUCT}/substruct.txt: ${SUBSTRUCT}
+	${MAKESCRIPT} $> '${SUBJ} struct'
 
-# concatinate the middle two run within each subject
-${FBASE}/run_two.txt: ${FBASE}/run_${RUN}.txt
-	tac ${<[1:3]} > ${>0}
+${SUBFUNC}/subfunc.rev.txt: ${SUBFUNC}/subfunc.txt
+	cp $< $>
+	sed -i -e 'iHello' $>
+
+${SUBSTRUCT}/substruct.rev.txt: ${SUBSTRUCT}/substruct.txt
+	cp $< $>
+	sed -i -e 'iHello' $>
+
+${ALLFUNC}/func.cat.txt: ${SUBFUNC}/subfunc.txt
+	${JOINSCRIPT} $> $<
+
+${ALLSTRUCT}/struct.cat.txt: ${SUBSTRUCT}/substruct.txt
+	${JOINSCRIPT} $> $<
+

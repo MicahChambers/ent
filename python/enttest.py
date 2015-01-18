@@ -5,7 +5,7 @@ import sys
 import os
 
 def main(args):
-    entobj = ent.Ent(os.getcwd())
+    entobj = ent.Ent('localhost', 12345)
 
     if len(args) > 0:
         entobj.load(args[0])
@@ -17,7 +17,7 @@ def main(args):
 ##
     # submit jobs
 #    entobj.simulate()
-    entobj.submit("localhost", 12345)
+    entobj.submit()
 
 
 if __name__ == "__main__":
