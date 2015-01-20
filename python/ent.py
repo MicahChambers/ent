@@ -17,11 +17,9 @@ from pathlib import Path
 Main Data Structures:
     Ent: Parser and Global Class
 
-    Ring: Hold a concrete set of Command Line Arguments, input and output files
+    Job: Hold a concrete set of Command Line Arguments, input and output files
 
-    Branch: Generator of Rings
-
-    File: Holds a file name knowns which ring generates it
+    File: Holds a file name, and knowns which job generates it
 
     Requestor
 
@@ -121,7 +119,7 @@ class EntCommunicator(asynchat.async_chat):
         return self.response
 
 def parseV1(filename):
-    """Reads a file and returns branchs, and variables as a tuple
+    """Reads a file and returns Generators, and variables as a tuple
 
     Variable names may be [a-zA-Z0-9_]*
     Variable values may be anything but white space, multiple values may
@@ -138,10 +136,10 @@ def parseV1(filename):
 
     lineno=0
     fullline = ""
-    cbranch = None
+    cgen = None
 
     # Outputs
-    branches = []
+    jobs = []
     variables = {'.PWD' : os.getcwd()}
 
     ## Clean Input
@@ -169,19 +167,19 @@ def parseV1(filename):
     for line in lines:
         if VERBOSE > 4: print("line %i:\n%s" % (lineno, line))
 
-        # if there is a current branch we are working
-        # the first try to append commands to it
-        if cbranch:
+        # if there is a current Generator we are building
+        # then first try to append commands to it
+        if cgen:
             cmdmatch = cmdre.fullmatch(line)
             if cmdmatch:
-                # append the extra command to the branch
-                cbranch.cmds.append(cmdmatch.group(1))
+                # append the extra command to the Generator
+                cgen.cmds.append(cmdmatch.group(1))
                 continue
             else:
-                # done with current branch, remove current link
-                branches.append(cbranch)
-                if VERBOSE > 0: print("Adding branch: %s" % cbranch)
-                cbranch = None
+                # done with current Generator, remove current link
+                jobs.append(cgen)
+                if VERBOSE > 0: print("Adding Generator: %s" % cgen)
+                cgen = None
 
         # if this isn't a command, try the other possibilities
         iomatch = iomre.fullmatch(line)
@@ -193,9 +191,9 @@ def parseV1(filename):
             inputs = [s for s in inputs if len(s) > 0]
             outputs = [s for s in outputs if len(s) > 0]
 
-            # create a new branch
-            cbranch = Branch(inputs, outputs)
-            if VERBOSE > 3: print("New Branch: %s:%s" % (inputs, outputs))
+            # create a new generator
+            cgen = Generator(inputs, outputs)
+            if VERBOSE > 3: print("New Generator: %s:%s" % (inputs, outputs))
         elif varmatch:
             # split variables
             name = varmatch.group(1)
@@ -210,7 +208,7 @@ def parseV1(filename):
 
     if VERBOSE > 3: print("Done With Initial Pass!")
 
-    return (branches, variables)
+    return (jobs, variables)
 
 
 ##
@@ -310,23 +308,21 @@ class Ent:
     variables, all jobs, all files etc.
 
     Organization:
-    Branch: This is a generic rule of how a particular set of inputs generates
+    Generator: This is a generic rule of how a particular set of inputs generates
     a particular set of outputs.
-
-    Ring: This is a concrete command to be run
 
     """
     error = 0
     files = dict()   # filename -> File
     variables = dict() # varname -> list of values
-    rings = list()
+    jobs = list()
 
     def __init__(self, host, port, entfile = None):
         """ Ent Constructor """
         self.error = 0
         self.files = dict()
         self.variables = {'.PWD' : os.getcwd()}
-        self.rings = list()
+        self.jobs = list()
         self.usetime = True
         self.comm = EntCommunicator(host,port)
 
@@ -335,18 +331,18 @@ class Ent:
             self.load(entfile)
 
     def load(self, entfile):
-        branches, self.variables = parseV1(entfile)
-        if not branches or not self.variables:
+        jobs, self.variables = parseV1(entfile)
+        if not jobs or not self.variables:
             raise "Error Parsing input file %s" % entfile
 
-        # expand all the branches into rings
-        for bb in branches:
-            # get rings and files this generates
-            rlist = bb.genRings(self.files, self.variables)
-            if rlist == None:
+        # expand all the Generators into Jobs
+        for bb in jobs:
+            # get jobs and files this generates
+            jlist = bb.genJobs(self.files, self.variables)
+            if jlist == None:
                 return -1
-            # add rings to list of rings
-            self.rings.extend(rlist)
+            # add jobs to list of jobs
+            self.jobs.extend(jlist)
 
     def loadstate(self, fname):
         """
@@ -376,52 +372,86 @@ class Ent:
             else:
                 f.finished = False
 
-        unmet = []
-        for f in self.files.values():
-            if f.finished:
-                print("Using Existing: %s" % f.path)
-            elif f.genr:
-                print("Generating: %s" % f.path)
-            else:
-                print("The following file does not have a generator")
-                print(f)
-                return -1
+#        unmet = []
+#        for f in self.files.values():
+#            if f.finished:
+#                print("Using Existing: %s" % f.path)
+#            elif f.genr:
+#                print("Generating: %s" % f.path)
+#            else:
+#                print("The following file does not have a generator")
+#                print(f)
+#                return -1
+#
+#        ### Start Running Jobs ###
+#        outqueue = []
+#        rqueue = self.jobs
+#        watching = []
+#        while len(rqueue) > 0:
+#            for i, job in enumerate(rqueue):
+#                try:
+#                    cmds = job.getcmd(self.variables)
+#
+#                    hasher = hashlib.md5()
+#                    hasher.update(repr(cmds).encode('utf-8'))
+#                    for f in job.inputs:
+#                        if f.md5sum:
+#                            hasher.update(repr(f.md5sum).encode('utf-8'))
+#
+#                    watching.append(submit(cmds, cmds[0][0:5]+hasher.hexdigest()))
+#                except InputError:
+#                    pass
+#
+#            # Check On Watching Processes
+#            jobinfo = self.comm.openSyncRW('PID '+' '.join([w for w in str(watching)]))
+#            print("Job Info:\n%s\n" % str(jobinfo))
+#
+#            # To Do Find a Way to determine whethe jobs FAIL
+#            for w in watching:
+#                if w not in jobinfo
+#            if len(done) > 0:
+#                done.reverse()
+#                for i in done:
+#                    del(rqueue[i])
+#            else:
+#                print("Error The Following Job has Unresolved Dependencies!")
+#                for rr in rqueue:
+#                    print(rr)
+#                raise InputError("Unresolved Dependencies")
+#
 
-        ### Start Running Jobs ###
-        outqueue = []
-        rqueue = self.rings
-        watching = []
-        while len(rqueue) > 0:
-            for i, ring in enumerate(rqueue):
-                try:
-                    cmds = ring.getcmd(self.variables)
+    def genmakefile(self, filename):
+        # Identify Files without Generators
+        rootfiles = []
+        for k,v in self.files.items():
+            if v.genr == None:
+                v.finished = True
+                rootfiles.append(k)
 
-                    hasher = hashlib.md5()
-                    hasher.update(repr(cmds).encode('utf-8'))
-                    for f in ring.inputs:
-                        if f.md5sum:
-                            hasher.update(repr(f.md5sum).encode('utf-8'))
+        # Inform the user
+        print("The Following Files Must Exist in the Filesystem:")
+        for f in rootfiles:
+            print(f)
 
-                    watching.append(submit(cmds, cmds[0][0:5]+hasher.hexdigest()))
-                except InputError:
-                    pass
+        with open(filename, "w") as f:
+            for job in self.jobs:
+                ## Create Dummy Jobs for multiple outputs
 
-            # Check On Watching Processes
-            jobinfo = self.comm.openSyncRW('PID '+' '.join([w for w in str(watching)]))
-            print("Job Info:\n%s\n" % str(jobinfo))
+                ## Write Inputs. Outputs
+                f.write(' '.join([o.path for o in job.outputs]))
+                f.write(': ')
+                f.write(' '.join([i.path for i in job.inputs]))
 
-            # To Do Find a Way to determine whethe jobs FAIL
-            for w in watching:
-                if w not in jobinfo
-            if len(done) > 0:
-                done.reverse()
-                for i in done:
-                    del(rqueue[i])
-            else:
-                print("Error The Following Rings of UnResolved Dependencies!")
-                for rr in rqueue:
-                    print(rr)
-                raise InputError("Unresolved Dependencies")
+                for cmd in job.cmds:
+                    try:
+                        cmd = " ".join(re.split("\s+", cmd))
+                        cmd = expand(cmd, job.inputs, job.outputs, self.variables)
+                    except InputError as e:
+                        print("While Expanding Command %s" % cmd)
+                        print(e.msg)
+                        sys.exit(-1)
+                    f.write('\n\t%s' % cmd)
+                f.write('\n')
 
     def simulate(self):
         # Identify Files without Generators
@@ -437,13 +467,13 @@ class Ent:
             print(f)
 
         outqueue = []
-        rqueue = self.rings
+        rqueue = copy.deepcopy(self.jobs)
         while len(rqueue) > 0:
             thispass = []
             done = []
-            for i, ring in enumerate(rqueue):
+            for i, job in enumerate(rqueue):
                 try:
-                    cmds = ring.simulate(self.variables)
+                    cmds = job.simulate(self.variables)
                     thispass.append(" &&".join(cmds))
                     done.append(i)
                 except InputError:
@@ -457,7 +487,7 @@ class Ent:
                 for i in done:
                     del(rqueue[i])
             else:
-                print("Error The Following Rings of UnResolved Dependencies!")
+                print("Error The Following Job has Unresolved Dependencies!")
                 for rr in rqueue:
                     print(rr)
                 raise InputError("Unresolved Dependencies")
@@ -478,8 +508,8 @@ class File:
     path = ""  # final path to use for input/output
     force = ""      # force update of file even if file exists with the same md5
     md5sum = 0      # md5sum
-    genr = None     # pointer to the ring which generates the file
-    users = []      # List of Downstream rings that need this file
+    genr = None     # pointer to the Job which generates the file
+    users = []      # List of Downstream Jobs that need this file
     finished = False
 
     def __init__(self, path):
@@ -495,7 +525,7 @@ class File:
         self.path = path
         self.finished = False
 
-        # Should be Updated By Ring
+        # Should be Updated By Job
         self.genr = None
         self.users = []
 
@@ -506,7 +536,7 @@ class File:
         elif self.genr:
             return self.genr.run()
         else:
-            raise InputError(self.path, "No Branch Creates File")
+            raise InputError(self.path, "No Generator Creates File")
 
     def __str__(self):
         if self.finished:
@@ -515,13 +545,12 @@ class File:
             return self.path + " (incomplete) "
 
 ###############################################################################
-# Branch Class
+# Generator Class
 ###############################################################################
-class Branch:
+class Generator:
     """
-    A branch is a job that has not been split up into rings (which are the
-    actual jobs with resolved filenames). Thus each Branch may have any number
-    of jobs associated with it.
+    A Generator is a job that has not been split up into Jobs. Thus each
+    Generator may have any number of jobs associated with it.
     """
 
     cmds = list()
@@ -533,9 +562,9 @@ class Branch:
         self.inputs = inputs
         self.outputs = outputs
 
-    def genRings(self, gfiles, gvars):
-        """ The "main" function of Branch is genRings. It produces a list of
-        rings (which are specific jobs with specific inputs and outputs)
+    def genJobs(self, gfiles, gvars):
+        """ The "main" function of Generator is genJobs. It produces a list of
+        Job (with concrete inputs and outputs)
         and updates files with any newly refernenced files. May need global
         gvars to resolve file names.
 
@@ -548,8 +577,8 @@ class Branch:
 
         """
 
-        # produce all the rings from inputs/outputs
-        rings = list()
+        # produce all the Jobs from inputs/outputs
+        jobs = list()
 
         # store array of REAL output paths
         outputs = [self.outputs]
@@ -589,7 +618,7 @@ class Branch:
             vname = match.group(2)
             suff = match.group(3)
             if vname not in gvars:
-                raise InputError("genRings", "Error! Unknown global variable "
+                raise InputError("genJobs", "Error! Unknown global variable "
                         "reference: %s" % vname)
 
             subre = re.compile('\${\s*'+vname+'\s*}')
@@ -628,7 +657,7 @@ class Branch:
                 valreal.append(newvar)
 
         # now that we have expanded the outputs, just need to expand input
-        # and create a ring to store each realization of the expansion process
+        # and create a job to store each realization of the expansion process
         for curouts, curvars in zip(outputs, valreal):
             curins = []
 
@@ -678,7 +707,7 @@ class Branch:
                 curins.extend(final_invals)
 
             # find inputs and outputs in the global files database, and then
-            # pass them in as a list to the new ring
+            # pass them in as a list to the new job
 
             # change curins to list of Files, instead of strings
             print(curins)
@@ -690,7 +719,7 @@ class Branch:
                     curins[ii] = File(name)
                     gfiles[name] = curins[ii]
 
-            # find outputs (checking for double-producing is done in Ring, below)
+            # find outputs (checking for double-producing is done in Job, below)
             for ii, name in enumerate(curouts):
                 if name in gfiles:
                     curouts[ii] = gfiles[name]
@@ -698,18 +727,18 @@ class Branch:
                     curouts[ii] = File(name)
                     gfiles[name] = curouts[ii]
 
-            # append ring to list of rings
-            oring = Ring(curins, curouts, self.cmds, self)
-            if VERBOSE > 2: print("New Ring:%s"% str(oring))
+            # append Job to list of jobs
+            oring = Job(curins, curouts, self.cmds, self)
+            if VERBOSE > 2: print("New Job:%s"% str(oring))
 
-            # append ring to list of rings
-            rings.append(oring)
+            # append job to list of jobs
+            jobs.append(oring)
 
         # find external files referenced as inputs
-        return rings
+        return jobs
 
     def __str__(self):
-        tmp = "Branch"
+        tmp = "Generator"
         for cc in self.cmds:
             tmp = tmp + ("\tCommand: %s\n" % cc)
         tmp = tmp + ("\tInputs: %s\n" % self.inputs)
@@ -717,9 +746,9 @@ class Branch:
         return tmp
 
 ###############################################################################
-# Branch Class
+# Job Class
 ###############################################################################
-class Ring:
+class Job:
     """ A job with a concrete set of inputs and outputs """
 
     # inputs are nested so that outer values refer to
@@ -807,12 +836,12 @@ class Ring:
                 out.finished = True
             return cmds
         else:
-            raise InputError("Ring: "+str(self)+" not yet ready")
+            raise InputError("Job: "+str(self)+" not yet ready")
 
 
 
     def __str__(self):
-        out = "Ring\n"
+        out = "Job\n"
         out = out + "\tParent:\n"
 
         if self.parent:

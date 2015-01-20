@@ -16,8 +16,9 @@ def main(args):
 ##    entobj.connect()
 ##
     # submit jobs
-#    entobj.simulate()
-    entobj.submit()
+    entobj.simulate()
+    entobj.genmakefile('test.make')
+#    entobj.submit()
 
 
 if __name__ == "__main__":
