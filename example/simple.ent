@@ -1,12 +1,9 @@
-BASE=/tmp/data/
+BASE=/ifs/tmp/data/
 
 #SUBJ =	10588 10659 10844 1103 1395 14298 15440 16051 1688 174 17614 1850 \
 #		20207 20242 22670 2367 23713 27014 27641 28652 31866 32282 3886 4265 \
 #		5778 6041 6645 7390 7866 9809
 SUBJ =	10588 10659 10844
-
-MAKESCRIPT = ${.PWD}/createfile.sh
-JOINSCRIPT = ${.PWD}/join.sh
 
 ALLFUNC = ${BASE}/func/
 ALLSTRUCT = ${BASE}/struct/
@@ -22,10 +19,10 @@ ${ALLFUNC} ${ALLSTRUCT}:
 	mkdir -p $>
 
 ${SUBFUNC}/subfunc.txt: ${SUBFUNC}
-	${MAKESCRIPT} $> '${SUBJ} func'
+	echo struct ${SUBJ} > $> 
 
 ${SUBSTRUCT}/substruct.txt: ${SUBSTRUCT}
-	${MAKESCRIPT} $> '${SUBJ} struct'
+	echo struct ${SUBJ} > $> 
 
 ${SUBFUNC}/subfunc.rev.txt: ${SUBFUNC}/subfunc.txt
 	cp $< $>
@@ -36,8 +33,8 @@ ${SUBSTRUCT}/substruct.rev.txt: ${SUBSTRUCT}/substruct.txt
 	sed -i -e 'iHello' $>
 
 ${ALLFUNC}/func.cat.txt: ${SUBFUNC}/subfunc.txt
-	${JOINSCRIPT} $> $<
+	cat $< > $<
 
 ${ALLSTRUCT}/struct.cat.txt: ${SUBSTRUCT}/substruct.txt
-	${JOINSCRIPT} $> $<
+	cat $< > $<
 

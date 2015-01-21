@@ -1,13 +1,9 @@
-import asyncore
-import asynchat
-import logging
-import socket
+
+import drmaa
 import os, time
 import re
 import copy
 import sys
-import asyncore
-import asynchat
 import json
 import hashlib
 import subprocess
@@ -28,22 +24,56 @@ Main Data Structures:
 
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
+
 VERBOSE=10
+BUILTINS = frozenset(['cp', 'rm', 'mkdir', 'sed'])
+
+decodestatus = {
+    drmaa.JobState.UNDETERMINED: 'process status cannot be determined',
+    drmaa.JobState.QUEUED_ACTIVE: 'job is queued and active',
+    drmaa.JobState.SYSTEM_ON_HOLD: 'job is queued and in system hold',
+    drmaa.JobState.USER_ON_HOLD: 'job is queued and in user hold',
+    drmaa.JobState.USER_SYSTEM_ON_HOLD: 'job is queued and in user and system hold',
+    drmaa.JobState.RUNNING: 'job is running',
+    drmaa.JobState.SYSTEM_SUSPENDED: 'job is system suspended',
+    drmaa.JobState.USER_SUSPENDED: 'job is user suspended',
+    drmaa.JobState.DONE: 'job finished normally',
+    drmaa.JobState.FAILED: 'job finished, but failed',
+    }
 
 def md5sum(fname):
-    out = subprocess.check_output(['md5sum', fname])
-    m = md5re.match(out.decode('utf-8'))
-    if m and not m.group(3):
-        return m.group(1)
-    else:
-        return None
+    out = dict()
+    if type(fname) != type([]):
+        fname = [fname]
+ 
+    for ff in fname:
+        try:
+            p = Path(ff)
+            m = hashlib.md5()
+            stat = p.stat()
+            m.update(str(stat.st_mtime).encode())
+            out[ff] = m.hexdigest()
+        except FileNotFoundError:
+            pass
+    
+    return out
 
-def submit(cmd, name):
-    # TODO check upstream to see if job already exists with same name
-    print("Sumitting")
-    print(cmd)
-    proc = subprocess.Popen(cmd)
-    return proc.pid
+
+#def md5sum(fname):
+#    out = dict()
+#    if type(fname) != type([]):
+#        fname = [fname]
+# 
+#    for ff in fname:
+#        try:
+#            txt = subprocess.check_output(['md5sum', ff])
+#            m = md5re.match(txt.decode('utf-8'))
+#            if m and not m.group(3):
+#                out[m.group(2)] = m.group(1)
+#        except subprocess.CalledProcessError:
+#            pass
+#    
+#    return out
 
 class InputError(Exception):
     """Exception raised for errors in the input.
@@ -55,68 +85,6 @@ class InputError(Exception):
     def __init__(self, expr, msg):
         self.expr = expr
         self.msg = msg
-
-class EntCommunicator(asynchat.async_chat):
-    """
-    Requests information from EntMoot on currently running jobs. May eventually
-    add information about filesystem as well.
-
-    Usage:
-    comm = EntCommunicator(host,port)
-    jobinfo = comm.openSyncRW(['USER username'])
-    jobinfo = comm.openSyncRW(['USER username username ...'])
-    jobinfo = comm.openSyncRW(['PID pid'])
-    jobinfo = comm.openSyncRW(['PID pid pid pid pid ... '])
-    jobinfo = comm.openSyncRW(['PID pid pid pid pid ... ', 'USER username username'])
-    """
-    def __init__(self, host, port):
-        self.received_data = []
-        self.logger = logging.getLogger('EntCommunicator')
-        asynchat.async_chat.__init__(self)
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.host = host
-        self.port = port
-
-    def handle_connect(self):
-        self.logger.debug('handle_connect()')
-        self.set_terminator(b'\n\n')
-
-    def collect_incoming_data(self, data):
-        """Read an incoming message from the server"""
-        self.logger.debug('collect_incoming_data() -> (%d)\n"""%s"""', len(data), data)
-        self.received_data.append(data)
-
-    def found_terminator(self):
-        self.logger.debug('found_terminator()')
-        received_message = ''.join([bstr.decode("utf-8") for bstr in self.received_data])
-        self.response = json.loads(received_message)
-        self.close()
-
-    def openSyncRW(self, reqlist):
-        self.logger.debug('connecting to %s', (self.host, self.port))
-        self.connect((self.host, self.port))
-        self.response = {}
-
-        ## Connect
-        self.logger.debug('connecting to %s', self.host+':'+str(self.port))
-        self.connect((self.host, self.port))
-
-        # Convert String To List
-        if type(reqlist) != type([]):
-            reqlist = [reqlist]
-
-        # Push All the Requests
-        for req in reqlist:
-            req = req.strip()
-            if len(req) == 0:
-                continue
-            self.logger.debug('Sending Request: %s' % req)
-            self.push(bytearray(req+'\n', 'utf-8'))
-        self.push(b'\n')
-
-        tmpmap = {}
-        asyncore.loop(map=tmpmap)
-        return self.response
 
 def parseV1(filename):
     """Reads a file and returns Generators, and variables as a tuple
@@ -312,10 +280,6 @@ class Ent:
     a particular set of outputs.
 
     """
-    error = 0
-    files = dict()   # filename -> File
-    variables = dict() # varname -> list of values
-    jobs = list()
 
     def __init__(self, host, port, entfile = None):
         """ Ent Constructor """
@@ -323,8 +287,6 @@ class Ent:
         self.files = dict()
         self.variables = {'.PWD' : os.getcwd()}
         self.jobs = list()
-        self.usetime = True
-        self.comm = EntCommunicator(host,port)
 
         # load the file
         if entfile:
@@ -341,86 +303,153 @@ class Ent:
             jlist = bb.genJobs(self.files, self.variables)
             if jlist == None:
                 return -1
+            # Resolve Variable Names in jobs
+            for job in jlist:
+                job.cmds = job.getcmd(self.variables)
+            
             # add jobs to list of jobs
             self.jobs.extend(jlist)
 
-    def loadstate(self, fname):
-        """
-        Loads a file of modification times
-        """
-        with open(fname, 'r') as f:
-            lines = f.readlines()
-        for line in lines:
-            m = modre.match(line)
-            if m and m.group(2) in self.files:
-                self.files[m.group(2)].modtime = int(m.group(1))
+    
+    def run(self, md5file = ""):
+        # Set up Grid Engine
+        self.gridengine = drmaa.Session()
+        self.gridengine.initialize()
+        template = self.gridengine.createJobTemplate()
 
-    def submit(self):
-        for f in self.files.values():
-            p = Path(f.path)
-            if not p.exists():
-                f.finished = False
-            elif p.is_dir():
-                try:
-                    p.mkdir(parents=True)
-                except FileExistsError:
-                    pass
-                f.finished = True
-            elif f.md5sum == md5sum(f.path):
-                # no existing md5sum
-                f.finished = True
+#        # Create MD5 Sums
+        flist = [f.path for f in self.files.values()]
+#        for job in self.jobs:
+#            if len(job.cmds) > 0:
+#                for cmd in job.cmds:
+#                    flist.append(cmd[0])
+        newsums = md5sum(flist)
+
+        # Read State File
+        try:
+            with open(md5file, "r") as f:
+                sums = json.load(f)
+        except:
+            sums = dict()
+        
+        # Update Job Status' for jobs that have completely matching MD5's
+        for job in self.jobs:
+            ready = True
+            for inp in job.inputs:
+                p = inp.path
+                if p not in sums or p not in newsums or sums[p] != newsums[p]:
+                    ready = False
+                    break
+
+            for cmd in job.cmds:
+                if len(cmd) > 0:
+                    p = cmd[0]
+                    if p not in sums or p not in newsums or sums[p] != newsums[p]:
+                        ready = False
+                        break
+
+            if ready:
+                job.status = 'SUCCESS'
             else:
-                f.finished = False
+                job.status = 'WAITING'
 
-#        unmet = []
-#        for f in self.files.values():
-#            if f.finished:
-#                print("Using Existing: %s" % f.path)
-#            elif f.genr:
-#                print("Generating: %s" % f.path)
-#            else:
-#                print("The following file does not have a generator")
-#                print(f)
-#                return -1
-#
-#        ### Start Running Jobs ###
-#        outqueue = []
-#        rqueue = self.jobs
-#        watching = []
-#        while len(rqueue) > 0:
-#            for i, job in enumerate(rqueue):
-#                try:
-#                    cmds = job.getcmd(self.variables)
-#
-#                    hasher = hashlib.md5()
-#                    hasher.update(repr(cmds).encode('utf-8'))
-#                    for f in job.inputs:
-#                        if f.md5sum:
-#                            hasher.update(repr(f.md5sum).encode('utf-8'))
-#
-#                    watching.append(submit(cmds, cmds[0][0:5]+hasher.hexdigest()))
-#                except InputError:
-#                    pass
-#
-#            # Check On Watching Processes
-#            jobinfo = self.comm.openSyncRW('PID '+' '.join([w for w in str(watching)]))
-#            print("Job Info:\n%s\n" % str(jobinfo))
-#
-#            # To Do Find a Way to determine whethe jobs FAIL
-#            for w in watching:
-#                if w not in jobinfo
-#            if len(done) > 0:
-#                done.reverse()
-#                for i in done:
-#                    del(rqueue[i])
-#            else:
-#                print("Error The Following Job has Unresolved Dependencies!")
-#                for rr in rqueue:
-#                    print(rr)
-#                raise InputError("Unresolved Dependencies")
-#
+        # Queues. Jobs move from waitqueue to startqueue, startqueue to either
+        # runqueue or donequeue, and runqueue to startqueue or (in case of error)
+        # donequeue
+        waitqueue = [j for j in self.jobs] # jobs with unmet depenendencies
+        runqueue = []   # jobs that are currently running
+        startqueue = [] # Jobs the need to be started 
+        donequeue = []  # jobs that are done
+        while waitqueue or runqueue:
+            prevwlen = len(waitqueue)
+            prevrlen = len(runqueue)
+
+            ## For when jobs have unfulfilled deps
+            for job in waitqueue:
+                # check if inputs have been produced
+                ready = True
+                for inp in job.inputs:
+                    if inp.genr.status == 'FAIL' or inp.genr.status == 'DEPFAIL':
+                        ready = False
+                        job.status = 'DEPFAIL'
+                        donequeue.append(job)
+                        del(waitqueue[waitqueue.index(job)])
+                        if VERBOSE > 1:
+                            print("Dependency Failed for:\n%s"%str(job))
+                        break
+                    elif inp.genr.status != 'SUCCESS':
+                        ready = False
+                if ready:
+                    # Change to Queue State and Fill Command Queue
+                    if VERBOSE > 3:
+                        print("Job Ready to Run:\n%s"%str(job))
+                    job.status = 'RUNNING'
+                    job.cmdqueue = [cmd for cmd in job.cmds]
+                    startqueue.append(job)
+                    del(waitqueue[waitqueue.index(job)])
+
+            for job in startqueue:
+                ## Get the Next Job (If there is one)
+                cmd = None
+                while not cmd and job.cmdqueue:
+                    cmd = job.cmdqueue.pop(0)
+    
+                if not cmd:
+                    # No More Jobs Left, Check Outputs
+                    job.status = 'SUCCESS'
+                    tmpsums = md5sum([f.path for f in job.outputs])
+                    for output in job.outputs:
+                        if output.path not in tmpsums:
+                            job.status = 'FAIL'
+                            donequeue.append(job)
+                            del(startqueue[startqueue.index(job)])
+                            if VERBOSE > 1:
+                                print("Output '%s' not generated by '%s'!"% (output.path, str(job)))
+                            break
+                    if job.status == 'SUCCESS':
+                        sums.update(tmpsums)
+                else:
+                    # Start the next job 
+                    if VERBOSE > 1:
+                        print("Submitting Job:\n%s " % str(cmd))
+                    template.remoteCommand = cmd[0]
+                    template.args = cmd[1:]
+                    job.pid = self.gridengine.runJob(template)
+                    if VERBOSE > 2:
+                        print("PID: %s" % job.pid)
+                    job.status = 'RUNNING'
+                    runqueue.append(job)
+                    del(startqueue[startqueue.index(job)])
+
+            ## For When a Job has been submitted (check on it)
+            for job in runqueue:
+                # Check Process with Grid Engine
+                stat = self.gridengine.jobStatus(job.pid)
+                if VERBOSE > 1:
+                    print("Checking in on %s" % str(job.pid))
+                    print("Status: %s " % decodestatus[stat])
+
+                if stat == drmaa.JobState.FAILED:
+                    job.status = 'FAIL'
+                    donequeue.append(job)
+                    del(runqueue[runqueue.index(job)])
+                elif stat == drmaa.JobState.DONE:
+                    # Move Back to the Start Queue
+                    startqueue.append(job)
+                    del(runqueue[runqueue.index(job)])
+
+
+            if prevwlen == len(waitqueue) and prevrlen == len(runqueue):
+                time.sleep(5)
+                print(sums)
+                with open(md5file, "w") as f:
+                    json.dump(sums, f)
+        
+        self.gridengine.deleteJobTemplate(template)
+        self.gridengine.exit()
 
     def genmakefile(self, filename):
+        
         # Identify Files without Generators
         rootfiles = []
         for k,v in self.files.items():
@@ -466,20 +495,26 @@ class Ent:
         for f in rootfiles:
             print(f)
 
+        finished = set()
         outqueue = []
-        rqueue = copy.deepcopy(self.jobs)
+        rqueue = [j for j in self.jobs]
         while len(rqueue) > 0:
-            thispass = []
             done = []
             for i, job in enumerate(rqueue):
-                try:
-                    cmds = job.simulate(self.variables)
-                    thispass.append(" &&".join(cmds))
+                # Check if all the inputs are ready
+                ready = True
+                for infile in job.inputs:
+                    if infile.path not in finished:
+                       ready = False
+                       break
+                
+                if ready:
+                    for out in job.outputs:
+                        finished.add(out.path)
+                    cmds = [' '.join(cmd) for cmd in job.cmds]
+                    outqueue.append(' && '.join(cmds))
                     done.append(i)
-                except InputError:
-                    pass
-            outqueue.extend(thispass)
-
+                
             # In the Real Runner we will also have to check weather there
             # are processes that are waiting
             if len(done) > 0:
@@ -762,6 +797,12 @@ class Job:
     outputs = list() #list of output files (File)
     cmds = []
     parent = None
+    pid = None
+    status = None
+    cmdqueue = [] # list of jobs that still need to be run
+
+    # WAITING/RUNNING/SUCCESS/FAIL/DEPFAIL
+    status = 'WAITING' 
 
     def __init__(self, inputs, outputs, cmds, parent = None):
         self.inputs = inputs
@@ -793,50 +834,16 @@ class Job:
             raise InputError("getcmd", "Missing command!")
 
         for cmd in self.cmds:
-            print(cmd)
             try:
-                print(cmd)
-                cmd = " ".join(re.split("\s+", cmd))
-                print(cmd)
                 cmd = expand(cmd, self.inputs, self.outputs, globvars)
-                if not first:
-                    fullcmd.append('&&')
-                print(cmd)
-                print(fullcmd)
-                fullcmd.extend(re.split("\s+", cmd))
-                print(fullcmd)
+                cmd = re.split('\s+', cmd)
+                fullcmd.append(cmd)
             except InputError as e:
                 print("While Expanding Command %s" % cmd)
                 print(e.msg)
                 sys.exit(-1)
 
         return fullcmd
-
-    def simulate(self, globvars):
-        # Check if all the inputs are ready
-        ready = True
-        for infile in self.inputs:
-           if not infile.finished:
-               ready = False
-               break
-
-        if ready:
-            cmds = []
-            for cmd in self.cmds:
-                try:
-                    cmd = " ".join(re.split("\s+", cmd))
-                    cmd = expand(cmd, self.inputs, self.outputs, globvars)
-                except InputError as e:
-                    print("While Expanding Command %s" % cmd)
-                    print(e.msg)
-                    sys.exit(-1)
-                cmds.append(cmd)
-
-            for out in self.outputs:
-                out.finished = True
-            return cmds
-        else:
-            raise InputError("Job: "+str(self)+" not yet ready")
 
 
 
