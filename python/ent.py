@@ -45,7 +45,7 @@ def md5sum(fname):
     out = dict()
     if type(fname) != type([]):
         fname = [fname]
- 
+
     for ff in fname:
         try:
             p = Path(ff)
@@ -55,7 +55,7 @@ def md5sum(fname):
             out[ff] = m.hexdigest()
         except FileNotFoundError:
             pass
-    
+
     return out
 
 
@@ -63,7 +63,7 @@ def md5sum(fname):
 #    out = dict()
 #    if type(fname) != type([]):
 #        fname = [fname]
-# 
+#
 #    for ff in fname:
 #        try:
 #            txt = subprocess.check_output(['md5sum', ff])
@@ -72,7 +72,7 @@ def md5sum(fname):
 #                out[m.group(2)] = m.group(1)
 #        except subprocess.CalledProcessError:
 #            pass
-#    
+#
 #    return out
 
 class InputError(Exception):
@@ -179,36 +179,74 @@ def parseV1(filename):
     return (jobs, variables)
 
 
+## Expand String Based on Local (First) then Global Variables
+# only expands variables that match ${[a-zA-Z0-9_]}
+def expand_variables(instr, localvars, gvars):
+    inlist = [instr]
+
+    # the expanded version (for instance if there are multi-value)
+    # arguments
+    final_vals = []
+    while len(inlist) > 0:
+        tmp = inlist.pop()
+        match = gvarre.fullmatch(tmp)
+        if match:
+            pref = match.group(1)
+            name = match.group(2)
+            suff = match.group(3)
+
+            # resolve variable name
+            if name in localvars:
+                # variable in the list of output vars, just sub in
+                inlist.append(pref + localvars[name] + suff)
+            elif name in gvars:
+                # if it is a global variable, then we don't have a
+                # value from output, if there are multiple values
+                # then it is a compound (multivalue) input
+                realvals = gvars[name]
+                if len(realvals) == 1:
+                    tmp = pref + realvals[0] + suff
+                    inlist.append(tmp)
+                else:
+                    # multiple values, insert in reverse order,
+                    # to make first value in list first to be
+                    # resolved in next iteration
+                    tmp = [pref + vv + suff for vv in
+                            reversed(realvals)]
+                    inlist.extend(tmp)
+            else:
+                raise InputError('expand_string', 'Error, input ' + \
+                        '"%s" references variable "%s"' % (inval, name) + \
+                        'which is a unknown!')
+        else:
+            final_vals.append(tmp)
+
+    return final_vals
+
 ##
-# @brief Parses a string with ${VARNAME} type syntax with the contents of
+# @brief Parses a string with ${<} type syntax with the contents of
 # defs. If a variable contains more variable those are resolved as well.
 # Special definitions:
 # ${<} replaced with all inputs
 # ${<N} where N is >= 0, replaced the the N'th input
 # ${>} replaced with all outputs
 # ${>N} where N is >= 0, replaced the the N'th output
-# ${*SEP*VARNAME}
 #
 # @param inputs List of Files
 # @param outputs List of List of Files
-# @param defs Global variables to check
 #
 # @return
-def expand(string, inputs, outputs, defs):
+def expand_args(string, inputs, outputs):
     # $> - 0 - all outputs
     # $< - 1 - all inputs
     # ${>#} - 2 - output number outputs
     # ${<#} - 3 - output number outputs
-    # ${*SEP*VARNAME} - 4,5 - expand VARNAME, separating them by SEP
-    # ${VARNAME} - 6 - expand varname
 
     allout  = "(\$>|\${>})|"
     allin   = "(\$<|\${<})|"
     singout = "\${>\s*([0-9]*)}|"
-    singin  = "\${<\s*([0-9]*)}|"
-    sepvar  = "\${\*([^*]*)\*([^}]*)}|"
-    regvar  = "\${([^}]*)}"
-    r = re.compile(allout+allin+singout+singin+sepvar+regvar)
+    singin  = "\${<\s*([0-9]*)}"
+    r = re.compile(allout+allin+singout+singin)
 
     ## Convert Inputs Outputs to Strings
     inputs = [f.path for f in inputs]
@@ -217,7 +255,7 @@ def expand(string, inputs, outputs, defs):
     ostring = string
     m = r.search(ostring)
     ii = 0
-    while m != None:
+    while m:
         ii += 1
         # perform lookup
         if m.group(1):
@@ -240,26 +278,6 @@ def expand(string, inputs, outputs, defs):
                 raise InputError("expand", "Error Resolving input number "
                         "%i in\n%s" % (i, string))
             insert = inputs[i]
-        elif m.group(5) and m.group(6):
-            # sepvar
-            k = str(m.group(6))
-            if k not in defs:
-                raise InputError("expand", "Error Resolving Variable "
-                        "%s in\n%s" % (k, string))
-            if type(defs[k]) == type([]):
-                insert = m.group(5).join(defs[k])
-            else:
-                insert = m.group(5)+m.group(6)
-        elif m.group(7):
-            # var
-            k = str(m.group(7))
-            if k not in defs:
-                raise InputError("expand", "Error Resolving Variable "
-                        "%s in\n%s" % (k, string))
-            if type(defs[k]) == type([]):
-                insert = " ".join(defs[k])
-            else:
-                insert = defs[k]
 
         ostring = ostring[:m.start()] + insert + ostring[m.end():]
         m = r.search(ostring)
@@ -306,11 +324,11 @@ class Ent:
             # Resolve Variable Names in jobs
             for job in jlist:
                 job.cmds = job.getcmd(self.variables)
-            
+
             # add jobs to list of jobs
             self.jobs.extend(jlist)
 
-    
+
     def run(self, md5file = ""):
         # Set up Grid Engine
         self.gridengine = drmaa.Session()
@@ -331,7 +349,7 @@ class Ent:
                 sums = json.load(f)
         except:
             sums = dict()
-        
+
         # Update Job Status' for jobs that have completely matching MD5's
         for job in self.jobs:
             ready = True
@@ -358,7 +376,7 @@ class Ent:
         # donequeue
         waitqueue = [j for j in self.jobs] # jobs with unmet depenendencies
         runqueue = []   # jobs that are currently running
-        startqueue = [] # Jobs the need to be started 
+        startqueue = [] # Jobs the need to be started
         donequeue = []  # jobs that are done
         while waitqueue or runqueue:
             prevwlen = len(waitqueue)
@@ -393,7 +411,7 @@ class Ent:
                 cmd = None
                 while not cmd and job.cmdqueue:
                     cmd = job.cmdqueue.pop(0)
-    
+
                 if not cmd:
                     # No More Jobs Left, Check Outputs
                     job.status = 'SUCCESS'
@@ -409,7 +427,7 @@ class Ent:
                     if job.status == 'SUCCESS':
                         sums.update(tmpsums)
                 else:
-                    # Start the next job 
+                    # Start the next job
                     if VERBOSE > 1:
                         print("Submitting Job:\n%s " % str(cmd))
                     template.remoteCommand = cmd[0]
@@ -444,12 +462,12 @@ class Ent:
                 print(sums)
                 with open(md5file, "w") as f:
                     json.dump(sums, f)
-        
+
         self.gridengine.deleteJobTemplate(template)
         self.gridengine.exit()
 
     def genmakefile(self, filename):
-        
+
         # Identify Files without Generators
         rootfiles = []
         for k,v in self.files.items():
@@ -474,7 +492,7 @@ class Ent:
                 for cmd in job.cmds:
                     try:
                         cmd = " ".join(re.split("\s+", cmd))
-                        cmd = expand(cmd, job.inputs, job.outputs, self.variables)
+                        cmd = expand_args(cmd, job.inputs, job.outputs)
                     except InputError as e:
                         print("While Expanding Command %s" % cmd)
                         print(e.msg)
@@ -507,14 +525,14 @@ class Ent:
                     if infile.path not in finished:
                        ready = False
                        break
-                
+
                 if ready:
                     for out in job.outputs:
                         finished.add(out.path)
                     cmds = [' '.join(cmd) for cmd in job.cmds]
                     outqueue.append(' && '.join(cmds))
                     done.append(i)
-                
+
             # In the Real Runner we will also have to check weather there
             # are processes that are waiting
             if len(done) > 0:
@@ -579,6 +597,7 @@ class File:
         else:
             return self.path + " (incomplete) "
 
+
 ###############################################################################
 # Generator Class
 ###############################################################################
@@ -597,10 +616,11 @@ class Generator:
         self.inputs = inputs
         self.outputs = outputs
 
+
     def genJobs(self, gfiles, gvars):
         """ The "main" function of Generator is genJobs. It produces a list of
         Job (with concrete inputs and outputs)
-        and updates files with any newly refernenced files. May need global
+        and updates files with any newly referenced files. May need global
         gvars to resolve file names.
 
         Parameters
@@ -695,57 +715,20 @@ class Generator:
         # and create a job to store each realization of the expansion process
         for curouts, curvars in zip(outputs, valreal):
             curins = []
+            cmds = []
 
             # for each input, fill in variable values from outputs
             for inval in self.inputs:
-                invals = [inval]
-
-                # the expanded version (for instance if there are multi-value)
-                # arguments
-                final_invals = []
-                while len(invals) > 0:
-                    tmp = invals.pop()
-                    match = gvarre.fullmatch(tmp)
-                    if match:
-                        pref = match.group(1)
-                        name = match.group(2)
-                        suff = match.group(3)
-
-                        # resolve variable name
-                        if name in curvars:
-                            # variable in the list of output vars, just sub in
-                            invals.append(pref + curvars[name] + suff)
-                        elif name in gvars:
-                            # if it is a global variable, then we don't have a
-                            # value from output, if there are multiple values
-                            # then it is a compound (multivalue) input
-                            realvals = gvars[name]
-                            if len(realvals) == 1:
-                                tmp = pref + realvals[0] + suff
-                                invals.append(tmp)
-                            else:
-                                # multiple values, insert in reverse order,
-                                # to make first value in list first to be
-                                # resolved in next iteration
-                                tmp = [pref + vv + suff for vv in
-                                        reversed(realvals)]
-                                invals.extend(tmp)
-                        else:
-                            print('Error, input "%s" references variable "%s"'\
-                                    'which is a unknown!' % (inval, name))
-                            return None
-
-                    else:
-                        final_invals.append(tmp)
-
                 # insert finalized invals into curins
-                curins.extend(final_invals)
+                curins.extend(expand_variables(inval, curvars, gvars))
 
-            # find inputs and outputs in the global files database, and then
+            for cmd in self.cmds:
+                # insert finalized invals into curins
+                cmds.extend(expand_variables(cmd, curvars, gvars))
+
+            # change curins to list of Files, instead of strings by
+            # finding inputs and outputs in the global files database, and then
             # pass them in as a list to the new job
-
-            # change curins to list of Files, instead of strings
-            print(curins)
             for ii, name in enumerate(curins):
                 if name in gfiles:
                     curins[ii] = gfiles[name]
@@ -763,7 +746,7 @@ class Generator:
                     gfiles[name] = curouts[ii]
 
             # append Job to list of jobs
-            oring = Job(curins, curouts, self.cmds, self)
+            oring = Job(curins, curouts, cmds, self)
             if VERBOSE > 2: print("New Job:%s"% str(oring))
 
             # append job to list of jobs
@@ -802,7 +785,7 @@ class Job:
     cmdqueue = [] # list of jobs that still need to be run
 
     # WAITING/RUNNING/SUCCESS/FAIL/DEPFAIL
-    status = 'WAITING' 
+    status = 'WAITING'
 
     def __init__(self, inputs, outputs, cmds, parent = None):
         self.inputs = inputs
@@ -835,7 +818,7 @@ class Job:
 
         for cmd in self.cmds:
             try:
-                cmd = expand(cmd, self.inputs, self.outputs, globvars)
+                cmd = expand_args(cmd, self.inputs, self.outputs)
                 cmd = re.split('\s+', cmd)
                 fullcmd.append(cmd)
             except InputError as e:

@@ -19,10 +19,10 @@ ${ALLFUNC} ${ALLSTRUCT}:
 	mkdir -p $>
 
 ${SUBFUNC}/subfunc.txt: ${SUBFUNC}
-	echo struct ${SUBJ} > $> 
+	echo struct ${SUBJ} > $>
 
 ${SUBSTRUCT}/substruct.txt: ${SUBSTRUCT}
-	echo struct ${SUBJ} > $> 
+	echo struct ${SUBJ} > $>
 
 ${SUBFUNC}/subfunc.rev.txt: ${SUBFUNC}/subfunc.txt
 	cp $< $>

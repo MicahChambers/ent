@@ -19,10 +19,10 @@ def main(args):
     # submit jobs
     try:
         entobj.simulate()
-        for i in range(10):
-            print(i)
-            time.sleep(1)
-        entobj.run('testmd5.json')
+#        for i in range(10):
+#            print(i)
+#            time.sleep(1)
+#        entobj.run('testmd5.json')
 #        entobj.genmakefile('test.make')
 #        entobj.submit()
     except InputError as e:
