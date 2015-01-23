@@ -59,22 +59,6 @@ def md5sum(fname):
     return out
 
 
-#def md5sum(fname):
-#    out = dict()
-#    if type(fname) != type([]):
-#        fname = [fname]
-#
-#    for ff in fname:
-#        try:
-#            txt = subprocess.check_output(['md5sum', ff])
-#            m = md5re.match(txt.decode('utf-8'))
-#            if m and not m.group(3):
-#                out[m.group(2)] = m.group(1)
-#        except subprocess.CalledProcessError:
-#            pass
-#
-#    return out
-
 class InputError(Exception):
     """Exception raised for errors in the input.
        Attributes:

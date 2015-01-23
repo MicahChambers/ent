@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
+import sys
+sys.path.append("/../ent/")
+
 import time
 import ent
-import sys
 import os
 
 def main(args):

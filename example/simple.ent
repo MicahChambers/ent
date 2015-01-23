@@ -8,7 +8,7 @@ SUBJ =	10588 10659 10844
 ALLFUNC = ${BASE}/func/
 ALLSTRUCT = ${BASE}/struct/
 
-SCRIPTDIR = /home/mchamber/ent/python/
+SCRIPTDIR = /home/mchamber/ent/example/
 
 SUBDIR = ${BASE}/${SUBJ}/
 SUBFUNC = ${SUBDIR}/func
