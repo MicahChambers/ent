@@ -8,6 +8,8 @@ SUBJ =	10588 10659 10844
 ALLFUNC = ${BASE}/func/
 ALLSTRUCT = ${BASE}/struct/
 
+SCRIPTDIR = /home/mchamber/ent/python/
+
 SUBDIR = ${BASE}/${SUBJ}/
 SUBFUNC = ${SUBDIR}/func
 SUBSTRUCT = ${SUBDIR}/struct
@@ -19,10 +21,10 @@ ${ALLFUNC} ${ALLSTRUCT}:
 	mkdir -p $>
 
 ${SUBFUNC}/subfunc.txt: ${SUBFUNC}
-	echo struct ${SUBJ} > $>
+	${SCRIPTDIR}/createfile.py $> func ${SUBJ}
 
 ${SUBSTRUCT}/substruct.txt: ${SUBSTRUCT}
-	echo struct ${SUBJ} > $>
+	${SCRIPTDIR}/createfile.py $> struct ${SUBJ}
 
 ${SUBFUNC}/subfunc.rev.txt: ${SUBFUNC}/subfunc.txt
 	cp $< $>
@@ -33,8 +35,8 @@ ${SUBSTRUCT}/substruct.rev.txt: ${SUBSTRUCT}/substruct.txt
 	sed -i -e 'iHello' $>
 
 ${ALLFUNC}/func.cat.txt: ${SUBFUNC}/subfunc.txt
-	cat $< > $<
+	${SCRIPTDIR}/catfiles.py ${>0} $<
 
 ${ALLSTRUCT}/struct.cat.txt: ${SUBSTRUCT}/substruct.txt
-	cat $< > $<
+	${SCRIPTDIR}/catfiles.py ${>0} $<
 
