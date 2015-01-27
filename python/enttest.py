@@ -1,17 +1,19 @@
 #!/usr/bin/python3
 
+import sys
+sys.path.append("/../ent/")
+
 import time
 import ent
-import sys
 import os
 
 def main(args):
-    entobj = ent.Ent('localhost', 12345)
+    entobj = ent.Ent()
 
-    if len(args) > 0:
-        entobj.load(args[0])
+    if len(args) == 2:
+        entobj.load(args[0], args[1])
     else:
-        entobj.load("ENTFILE")
+        entobj.load("ENTFILE", 'testmd5.json')
 
 ##    # open connections
 ##    entobj.connect()
@@ -19,15 +21,12 @@ def main(args):
     # submit jobs
     try:
         entobj.simulate()
-#        for i in range(10):
-#            print(i)
-#            time.sleep(1)
-#        entobj.run('testmd5.json')
+        for i in range(10):
+            print(i)
+            time.sleep(1)
+        entobj.run()
 #        entobj.genmakefile('test.make')
 #        entobj.submit()
-    except InputError as e:
-        print(e.msg)
-        sys.exit(-1)
     except:
         print("ERROR")
         sys.exit(-1)

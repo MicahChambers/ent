@@ -27,7 +27,7 @@ Main Data Structures:
 ## TODO add pipe to output expansion
 ## TODO handle quotes in variable definitions
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
-gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
+gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)\s*}(.*)')
 
 VERBOSE=10
 
@@ -155,7 +155,7 @@ def parseV1(filename):
 
     """
     iomre = re.compile("\s*([^:]*?)\s*:(?!//)\s*(.*?)\s*")
-    varre = re.compile("\s*([a-zA-Z0-9_.]*)\s*=\s*(.*?)\s*")
+    varre = re.compile("\s*([a-zA-Z0-9_.]+)\s*=\s*(.*?)\s*")
     cmdre = re.compile("\t\s*(.*?)\s*")
     commentre = re.compile("(.*?)#.*")
 
@@ -276,12 +276,68 @@ def expand_variables(instr, localvars, gvars):
                     inlist.extend(tmp)
             else:
                 raise InputError('expand_string', 'Error, input ' + \
-                        '"%s" references variable "%s"' % (inval, name) + \
+                        '"%s" references variable "%s"' % (instr, name) + \
                         'which is a unknown!')
         else:
             final_vals.append(tmp)
 
     return final_vals
+
+def split_command(instr):
+    quote_re = re.compile(r'((?:(?<!\\)(?:\\\\)*|[^\\]))"')
+
+    ##################################
+    # Split up Quoted Regions
+    ##################################
+    spl = []
+    start = 0
+    quote = False
+    for m in quote_re.finditer(instr):
+        prev = 0
+        if quote:
+            # if we are in a quote then stop at end of match
+            spl.append(instr[start:m.end()])
+            start = m.end()
+        else:
+            # otherwise stop at end-1
+            spl.append(instr[start:m.end()-1])
+            start = m.end()-1
+        quote = not quote
+
+        # if the command has a quote (that is preceed by an even number of
+        # back slashes) then start quote
+
+    if quote:
+        raise "Error, unmatched quotes in input!"
+    else:
+        spl.append(instr[start:])
+
+    ##################################
+    # Split Unquoted Regions on space
+    ##################################
+    newspl = []
+    currword = ""
+    for word in spl:
+        if not word:
+            continue
+
+        # Keep Entire quoted string together
+        if word[0] == '"':
+            if word[-1] != '"':
+                raise "ERROR PARSING"
+            currword += word[1:-1]
+            print('updated currword: "%s"' % currword)
+        else:
+            tmp = re.split('\s+', word)
+            if currword:
+                tmp[0] = currword + tmp[0]
+                currword = ""
+            newspl.extend(tmp)
+
+    if currword:
+        newspl.append(currword)
+
+    return [s for s in newspl if s]
 
 ##
 # @brief Parses a string with ${<} type syntax with the contents of
@@ -383,59 +439,68 @@ class Ent:
             raise 'unknown file type'
 
         if not jobs or not self.variables:
-            raise "Error Parsing input file %s" % entfile
 
         # expand all the Generators into Jobs
-        for bb in jobs:
+        for bb in self.generators:
             # get jobs and files this generates
             jlist = bb.genJobs(self.files, self.variables)
             if jlist == None:
                 return -1
-            # Resolve Variable Names in jobs
+            # Resolve Variable Names in Commands
             for job in jlist:
-                job.cmds = job.getcmd(self.variables)
+                for ii in range(len(job.cmds)):
+                    job.cmds[ii] = expand_args(job.cmds[ii], job.inputs, \
+                            job.outputs)
 
             # add jobs to list of jobs
             self.jobs.extend(jlist)
 
+        ##################################################################
+        # Read MD5 State From File, and compare with current MD5s
+        ##################################################################
 
-    def run(self, md5file = ""):
+        # Update File database with current md5sums
+        flist = [f.path for f in self.files.values()]
+        newsums = md5sum(flist)
+        print("MD5 Sums in Filesystem: %s" % json.dumps(newsums, indent=1))
+        for f in self.files.values():
+            if f.path in newsums:
+                f.md5sum = newsums[f.path]
+
+        # Read State File
+        try:
+            with open(self.md5state, "r") as f:
+                sums = json.load(f)
+            print("MD5 Sums from State File: %s" % json.dumps(sums, indent=1))
+        except:
+            if self.md5state:
+                print("Warning %s does not exist" % self.md5state)
+            else:
+                print("Warning no state file given, no state will be read "
+                        "or saved")
+            sums = dict()
+
+        # Update Job Status' for jobs that have matching MD5's
+        for job in self.jobs:
+            ready = True
+            print(job)
+            for out in job.outputs:
+                p = out.path
+                if p not in sums or not out.md5sum or sums[p] != out.md5sum:
+                    ready = False
+                    break
+
+            if ready:
+                job.status = 'SUCCESS'
+                print("All Outputs Exist for Job: %s" % str(job.cmds))
+            else:
+                job.status = 'WAITING'
+
+    def run(self):
         # Set up Grid Engine
         self.gridengine = drmaa.Session()
         self.gridengine.initialize()
         template = self.gridengine.createJobTemplate()
-
-#        # Create MD5 Sums
-        flist = [f.path for f in self.files.values()]
-        newsums = md5sum(flist)
-
-        # Read State File
-        try:
-            with open(md5file, "r") as f:
-                sums = json.load(f)
-        except:
-            sums = dict()
-
-        # Update Job Status' for jobs that have completely matching MD5's
-        for job in self.jobs:
-            ready = True
-            for inp in job.inputs:
-                p = inp.path
-                if p not in sums or p not in newsums or sums[p] != newsums[p]:
-                    ready = False
-                    break
-
-            for cmd in job.cmds:
-                if len(cmd) > 0:
-                    p = cmd[0]
-                    if p not in sums or p not in newsums or sums[p] != newsums[p]:
-                        ready = False
-                        break
-
-            if ready:
-                job.status = 'SUCCESS'
-            else:
-                job.status = 'WAITING'
 
         # Queues. Jobs move from waitqueue to startqueue, startqueue to either
         # runqueue or donequeue, and runqueue to startqueue or (in case of error)
@@ -490,12 +555,13 @@ class Ent:
                             if VERBOSE > 1:
                                 print("Output '%s' not generated by '%s'!"% (output.path, str(job)))
                             break
-                    if job.status == 'SUCCESS':
-                        sums.update(tmpsums)
+                        else:
+                            output.md5sum = tmpsums[output.path]
                 else:
                     # Start the next job
                     if VERBOSE > 1:
                         print("Submitting Job:\n%s " % str(cmd))
+                    cmd = split_command(cmd)
                     template.remoteCommand = cmd[0]
                     template.args = cmd[1:]
                     job.pid = self.gridengine.runJob(template)
@@ -525,9 +591,13 @@ class Ent:
 
             if prevwlen == len(waitqueue) and prevrlen == len(runqueue):
                 time.sleep(5)
-                print(sums)
-                with open(md5file, "w") as f:
-                    json.dump(sums, f)
+                try:
+                    with open(self.md5state, "w") as f:
+                        sums = {f.path: f.md5sum for f in self.files if f.md5sum}
+                        print(sums)
+                        json.dump(sums, f, indent=1)
+                except:
+                    pass
 
         self.gridengine.deleteJobTemplate(template)
         self.gridengine.exit()
@@ -583,6 +653,7 @@ class Ent:
 
         finished = set()
         outqueue = []
+        skipqueue = []
         rqueue = [j for j in self.jobs]
         while len(rqueue) > 0:
             done = []
@@ -594,11 +665,15 @@ class Ent:
                        ready = False
                        break
 
-                if ready:
+                if ready and job.status != 'SUCCESS':
                     for out in job.outputs:
                         finished.add(out.path)
-                    cmds = [' '.join(cmd) for cmd in job.cmds]
-                    outqueue.append(' && '.join(cmds))
+                    outqueue.append(' && '.join(job.cmds))
+                    done.append(i)
+                if ready and job.status == 'SUCCESS':
+                    for out in job.outputs:
+                        finished.add(out.path)
+                    skipqueue.append(' && '.join(job.cmds))
                     done.append(i)
 
             # In the Real Runner we will also have to check whether there
@@ -613,6 +688,9 @@ class Ent:
                     print(rr)
                 raise InputError("Unresolved Dependencies")
 
+        print("Jobs that are up to date")
+        for q in skipqueue:
+            print(q)
         print("Jobs to Run")
         for q in outqueue:
             print(q)
@@ -626,7 +704,7 @@ class File:
     in an md5 check, which returns success if it matches the previous value
     """
 
-    path = ""  # final path to use for input/output
+    path = None  # final path to use for input/output
     force = ""      # force update of file even if file exists with the same md5
     md5sum = 0      # md5sum
     genr = None     # pointer to the Job which generates the file
@@ -643,7 +721,7 @@ class File:
             any remote server
         """
 
-        self.path = path
+        self.path = str(Path(path))
         self.finished = False
 
         # Should be Updated By Job
@@ -657,13 +735,13 @@ class File:
         elif self.genr:
             return self.genr.run()
         else:
-            raise InputError(self.path, "No Generator Creates File")
+            raise InputError(str(self.path), "No Generator Creates File")
 
     def __str__(self):
         if self.finished:
-            return self.path + " (done) "
+            return str(self.path) + " (done) "
         else:
-            return self.path + " (incomplete) "
+            return str(self.path) + " (incomplete) "
 
 
 ###############################################################################
@@ -877,37 +955,15 @@ class Job:
         for ff in self.inputs:
             ff.users.append(self)
 
-    def getcmd(self, globvars):
-        fullcmd = []
-        first = True
-        print(self)
-        if not self.cmds:
-            print("Error no command for %s\n"%self)
-            raise InputError("getcmd", "Missing command!")
-
-        for cmd in self.cmds:
-            try:
-                cmd = expand_args(cmd, self.inputs, self.outputs)
-                cmd = re.split('\s+', cmd)
-                fullcmd.append(cmd)
-            except InputError as e:
-                print("While Expanding Command %s" % cmd)
-                print(e.msg)
-                sys.exit(-1)
-
-        return fullcmd
-
-
 
     def __str__(self):
         out = "Job\n"
         out = out + "\tParent:\n"
 
-        if self.parent:
-            for cc in self.parent.cmds:
-                out = out + ("\t\tCommand: %s\n" % cc)
-            out = out + ("\t\tInputs: %s\n" % self.parent.inputs)
-            out = out + ("\t\tOutputs: %s\n" % self.parent.outputs)
+        for cc in self.cmds:
+            out = out + ("\t\tCommand: %s\n" % cc)
+        out = out + ("\t\tInputs: %s\n" % self.parent.inputs)
+        out = out + ("\t\tOutputs: %s\n" % self.parent.outputs)
 
         out = out + "\tInputs: "
         count = 0
