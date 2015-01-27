@@ -6,7 +6,8 @@
 		"ALLSTRUCT" : ["${BASE}/struct/"],
 		"SUBDIR" : ["${BASE}/${SUBJ}/"],
 		"SUBFUNC" : ["${SUBDIR}/func"],
-		"SUBSTRUCT" : ["${SUBDIR}/struct"]
+		"SUBSTRUCT" : ["${SUBDIR}/struct"],
+		"SCRIPTDIR" : "/home/mchamber/ent/example/"
 	},
 	"generators" : [
         {
@@ -22,12 +23,12 @@
 		{
 			"inputs" : ["${SUBFUNC}"],
 			"outputs" : ["${SUBFUNC}/subfunc.txt"],
-			"commands" : ["echo struct ${SUBJ} > $>"]
+			"commands" : ["${SCRIPTDIR}/createfile.py $> func ${SUBJ}"]
 		},
 		{
 			"inputs" : ["${SUBSTRUCT}"],
 			"outputs" : ["${SUBSTRUCT}/substruct.txt"],
-			"commands" : ["echo struct ${SUBJ} > $>"]
+			"commands" : ["${SCRIPTDIR}/createfile.py $> struct ${SUBJ}"]
 		},
 		{
 			"inputs" : ["${SUBFUNC}/subfunc.txt"],
@@ -42,12 +43,12 @@
 		{
 			"inputs" : ["${SUBFUNC}/subfunc.txt"],
 			"outputs" : ["${ALLFUNC}/func.cat.txt"],
-			"commands" : ["cat $< > $<"]
+			"commands" : "${SCRIPTDIR}/catfiles.py ${>0} $<"
 		},
 		{
 			"inputs" : "${SUBSTRUCT}/substruct.txt",
 			"outputs" : "${ALLSTRUCT}/struct.cat.txt",
-			"commands" : ["cat $< > $<"]
+			"commands" : "${SCRIPTDIR}/catfiles.py ${>0} $<"
 		}
 	]
 }

@@ -416,12 +416,13 @@ class Ent:
 
     """
 
-    def __init__(self, entfile = None):
+    def __init__(self, entfile = None, statefile = None):
         """ Ent Constructor """
         self.error = 0
         self.files = dict()
         self.variables = {'.PWD' : os.getcwd()}
         self.jobs = list()
+        self.md5state = statefile
 
         # load the file
         if entfile:
@@ -431,17 +432,15 @@ class Ent:
         print(entfile)
         if entfile[-5:] == '.json':
             print("Parsing json")
-            jobs, self.variables = parseV2(entfile)
+            geners, self.variables = parseV2(entfile)
         elif entfile[-4:] == '.ent':
             print("Parsing ent")
-            jobs, self.variables = parseV1(entfile)
+            geners, self.variables = parseV1(entfile)
         else:
             raise 'unknown file type'
 
-        if not jobs or not self.variables:
-
         # expand all the Generators into Jobs
-        for bb in self.generators:
+        for bb in geners:
             # get jobs and files this generates
             jlist = bb.genJobs(self.files, self.variables)
             if jlist == None:
