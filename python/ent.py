@@ -1,5 +1,7 @@
+#!/usr/bin/python3
 
 import drmaa
+import argparse
 import os, time
 import re
 import copy
@@ -22,11 +24,32 @@ Main Data Structures:
     TODO Enforce 1 line per rule (or handle multi-line rules)
 """
 
+## TODO add pipe to output expansion
+## TODO handle quotes in variable definitions
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
 gvarre = re.compile('(.*?)\${\s*(.*?)\s*}(.*)')
 
 VERBOSE=10
-BUILTINS = frozenset(['cp', 'rm', 'mkdir', 'sed'])
+
+def main():
+    parser = argparse.ArgumentParser(description='Run ENT on an ent script')
+    parser.add_argument('--script', '-f', type=str,
+            help='Input script file', required=True)
+    parser.add_argument('--state', '-s', type=str, nargs=1,
+            default="", help='State file (to store md5 sums in')
+    parser.add_argument('--simulate', '-x', action='store_const', const=True,
+            default="", help='Simulate running rather than actually running')
+
+    args = parser.parse_args()
+
+    entobj = Ent(args.script)
+    if args.simulate:
+        entobj.simulate()
+    elif not args.state:
+        print("Warning no state file specified")
+        entobj.submit()
+    else:
+        entobj.submit(args.state)
 
 decodestatus = {
     drmaa.JobState.UNDETERMINED: 'process status cannot be determined',
@@ -40,6 +63,22 @@ decodestatus = {
     drmaa.JobState.DONE: 'job finished normally',
     drmaa.JobState.FAILED: 'job finished, but failed',
     }
+
+
+class InputError(Exception):
+    """Exception raised for errors in the input.
+       Attributes:
+       expr -- input expression in which the error occurred
+       msg  -- explanation of the error
+    """
+
+    def __init__(self, expr, msg):
+        self.expr = expr
+        self.msg = msg
+
+##############################################
+# Helper Functions
+##############################################
 
 def md5sum(fname):
     out = dict()
@@ -58,33 +97,54 @@ def md5sum(fname):
 
     return out
 
+def parseV2(filename):
+    """Reads a file and returns Generators, and variables as a tuple
 
-#def md5sum(fname):
-#    out = dict()
-#    if type(fname) != type([]):
-#        fname = [fname]
-#
-#    for ff in fname:
-#        try:
-#            txt = subprocess.check_output(['md5sum', ff])
-#            m = md5re.match(txt.decode('utf-8'))
-#            if m and not m.group(3):
-#                out[m.group(2)] = m.group(1)
-#        except subprocess.CalledProcessError:
-#            pass
-#
-#    return out
+    This is a JSON format:
 
-class InputError(Exception):
-    """Exception raised for errors in the input.
-       Attributes:
-       expr -- input expression in which the error occurred
-       msg  -- explanation of the error
+    {
+        "generators": [
+            {
+                "inputs" : ["{SUBJECT}/image"],
+                "outputs" : ["{SUBJECT}/outimage"]
+                "commands" : ["cp $< $>", "touch $<"]
+            },
+            ...etc
+        ]
+        "variables": {
+            "subjects" : ["a", "b", "c"],
+            ...etc
+        }
+    }
+
     """
 
-    def __init__(self, expr, msg):
-        self.expr = expr
-        self.msg = msg
+    variables = dict()
+    jobs = []
+    with open(filename, "r") as f:
+        infile = json.load(f)
+        variables = infile['variables']
+
+        # Check Variables
+        for kk,vv in variables.items():
+            if type(vv) != type([]):
+                variables[kk] = [vv]
+
+        for g in infile['generators']:
+            inputs = g['inputs']
+            outputs = g['outputs']
+            commands = g['commands']
+            if type(inputs) != type([]):
+                inputs = [inputs]
+            if type(outputs) != type([]):
+                outputs = [outputs]
+            if type(commands) != type([]):
+                commands = [commands]
+
+            jobs.append(Generator(inputs, outputs))
+            jobs[-1].cmds = commands
+
+    return (jobs, variables)
 
 def parseV1(filename):
     """Reads a file and returns Generators, and variables as a tuple
@@ -287,8 +347,9 @@ def expand_args(string, inputs, outputs):
     return ostring
 
 ###############################################################################
-# Ent Class
+# Classes
 ###############################################################################
+
 class Ent:
     """ Main Ent Class, all others are derived from this. This stores global
     variables, all jobs, all files etc.
@@ -299,7 +360,7 @@ class Ent:
 
     """
 
-    def __init__(self, host, port, entfile = None):
+    def __init__(self, entfile = None):
         """ Ent Constructor """
         self.error = 0
         self.files = dict()
@@ -311,7 +372,16 @@ class Ent:
             self.load(entfile)
 
     def load(self, entfile):
-        jobs, self.variables = parseV1(entfile)
+        print(entfile)
+        if entfile[-5:] == '.json':
+            print("Parsing json")
+            jobs, self.variables = parseV2(entfile)
+        elif entfile[-4:] == '.ent':
+            print("Parsing ent")
+            jobs, self.variables = parseV1(entfile)
+        else:
+            raise 'unknown file type'
+
         if not jobs or not self.variables:
             raise "Error Parsing input file %s" % entfile
 
@@ -337,10 +407,6 @@ class Ent:
 
 #        # Create MD5 Sums
         flist = [f.path for f in self.files.values()]
-#        for job in self.jobs:
-#            if len(job.cmds) > 0:
-#                for cmd in job.cmds:
-#                    flist.append(cmd[0])
         newsums = md5sum(flist)
 
         # Read State File
@@ -500,7 +566,9 @@ class Ent:
                     f.write('\n\t%s' % cmd)
                 f.write('\n')
 
-    def simulate(self):
+    def simulate(self, statefile = None):
+        print("May need to incorporate statefile...")
+
         # Identify Files without Generators
         rootfiles = []
         for k,v in self.files.items():
@@ -533,7 +601,7 @@ class Ent:
                     outqueue.append(' && '.join(cmds))
                     done.append(i)
 
-            # In the Real Runner we will also have to check weather there
+            # In the Real Runner we will also have to check whether there
             # are processes that are waiting
             if len(done) > 0:
                 done.reverse()
@@ -669,6 +737,7 @@ class Generator:
             if not match:
                 break
 
+            # TODO add pipe syntax here
             pref = match.group(1)
             vname = match.group(2)
             suff = match.group(3)
@@ -805,7 +874,7 @@ class Job:
                 ff.genr = self
 
         # add ourself to the list of users of the inputs
-        for igrp in self.inputs:
+        for ff in self.inputs:
             ff.users.append(self)
 
     def getcmd(self, globvars):
@@ -849,3 +918,6 @@ class Job:
             out = out + "\n\t\t\t" + str(ii)
         out = out + '\n'
         return out
+
+if __name__ == "__main__":
+    main()

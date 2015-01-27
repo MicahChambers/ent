@@ -1,0 +1,55 @@
+{
+	"variables" : {
+		"BASE":"/ifs/tmp/data/",
+		"SUBJ" : ["10588","10659","10844"],
+		"ALLFUNC" : ["${BASE}/func/"],
+		"ALLSTRUCT" : ["${BASE}/struct/"],
+		"SUBDIR" : ["${BASE}/${SUBJ}/"],
+		"SUBFUNC" : ["${SUBDIR}/func"],
+		"SUBSTRUCT" : ["${SUBDIR}/struct"]
+	},
+	"generators" : [
+        {
+            "inputs" : [],
+            "outputs" : ["${SUBDIR}", "${SUBFUNC}", "${SUBSTRUCT}"],
+            "commands" : ["mkdir -p $>"]
+        },
+		{
+			"inputs" : [],
+			"outputs" : ["${ALLFUNC}", "${ALLSTRUCT}"],
+			"commands" : ["mkdir -p $>"]
+		},
+		{
+			"inputs" : ["${SUBFUNC}"],
+			"outputs" : ["${SUBFUNC}/subfunc.txt"],
+			"commands" : ["echo struct ${SUBJ} > $>"]
+		},
+		{
+			"inputs" : ["${SUBSTRUCT}"],
+			"outputs" : ["${SUBSTRUCT}/substruct.txt"],
+			"commands" : ["echo struct ${SUBJ} > $>"]
+		},
+		{
+			"inputs" : ["${SUBFUNC}/subfunc.txt"],
+			"outputs" : ["${SUBFUNC}/subfunc.rev.txt"],
+			"commands" : ["cp $< $>", "sed -i -e 'iHello' $>"]
+		},
+		{
+			"inputs" : ["${SUBSTRUCT}/substruct.txt"],
+			"outputs" : ["${SUBSTRUCT}/substruct.rev.txt"],
+			"commands" : ["cp $< $>", "sed -i -e 'iHello' $>"]
+		},
+		{
+			"inputs" : ["${SUBFUNC}/subfunc.txt"],
+			"outputs" : ["${ALLFUNC}/func.cat.txt"],
+			"commands" : ["cat $< > $<"]
+		},
+		{
+			"inputs" : "${SUBSTRUCT}/substruct.txt",
+			"outputs" : "${ALLSTRUCT}/struct.cat.txt",
+			"commands" : ["cat $< > $<"]
+		}
+	]
+}
+
+
