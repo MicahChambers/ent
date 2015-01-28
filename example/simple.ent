@@ -8,7 +8,7 @@ SUBJ =	10588 10659 10844
 ALLFUNC = ${BASE}/func/
 ALLSTRUCT = ${BASE}/struct/
 
-SCRIPTDIR = /home/mchamber/ent/example/
+SCRIPTDIR = /ifs/students/mchambers/ent/example/
 
 SUBDIR = ${BASE}/${SUBJ}/
 SUBFUNC = ${SUBDIR}/func
@@ -28,11 +28,11 @@ ${SUBSTRUCT}/substruct.txt: ${SUBSTRUCT}
 
 ${SUBFUNC}/subfunc.rev.txt: ${SUBFUNC}/subfunc.txt
 	cp $< $>
-	sed -i -e 'iHello' $>
+	sed -i -e iHello $>
 
 ${SUBSTRUCT}/substruct.rev.txt: ${SUBSTRUCT}/substruct.txt
 	cp $< $>
-	sed -i -e 'iHello' $>
+	sed -i -e iHello $>
 
 ${ALLFUNC}/func.cat.txt: ${SUBFUNC}/subfunc.txt
 	${SCRIPTDIR}/catfiles.py ${>0} $<

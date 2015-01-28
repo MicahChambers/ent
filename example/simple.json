@@ -7,7 +7,7 @@
 		"SUBDIR" : ["${BASE}/${SUBJ}/"],
 		"SUBFUNC" : ["${SUBDIR}/func"],
 		"SUBSTRUCT" : ["${SUBDIR}/struct"],
-		"SCRIPTDIR" : "/home/mchamber/ent/example/"
+		"SCRIPTDIR" : "/ifs/students/mchambers/ent/example/"
 	},
 	"generators" : [
         {
@@ -33,12 +33,12 @@
 		{
 			"inputs" : ["${SUBFUNC}/subfunc.txt"],
 			"outputs" : ["${SUBFUNC}/subfunc.rev.txt"],
-			"commands" : ["cp $< $>", "sed -i -e 'iHello' $>"]
+			"commands" : ["cp $< $>", "sed -i -e iHello $>"]
 		},
 		{
 			"inputs" : ["${SUBSTRUCT}/substruct.txt"],
 			"outputs" : ["${SUBSTRUCT}/substruct.rev.txt"],
-			"commands" : ["cp $< $>", "sed -i -e 'iHello' $>"]
+			"commands" : ["cp $< $>", "sed -i -e iHello $>"]
 		},
 		{
 			"inputs" : ["${SUBFUNC}/subfunc.txt"],
