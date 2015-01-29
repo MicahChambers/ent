@@ -27,7 +27,7 @@ Main Data Structures:
 ## TODO add pipe to output expansion
 ## TODO handle quotes in variable definitions
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
-gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)?(\|[a-zA-Z0-9_.]+)?\s*}(.*)')
+gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)\s*}(.*)')
 
 VERBOSE=10
 
@@ -176,7 +176,7 @@ def parseV1(filename):
 
 	"""
 	iomre = re.compile("\s*([^:]*?)\s*:(?!//)\s*(.*?)\s*")
-	varre = re.compile("\s*([a-zA-Z0-9_.]+)\s*=\s*(.*?)\s*")
+	varre = re.compile("\s*([a-zA-Z0-9_.]+)(?:\[\s*([a-zA-Z0-9_.]+)\s*\])?\s*=\s*(.*?)\s*")
 	cmdre = re.compile("\t\s*(.*?)\s*")
 	commentre = re.compile("(.*?)#.*")
 
@@ -246,12 +246,17 @@ def parseV1(filename):
 		elif varmatch:
 			# split variables
 			name = varmatch.group(1)
-			values = re.split("\s+", varmatch.group(2))
+			values = re.split("\s+", varmatch.group(3))
 			if name in variables:
 				print("Error! Redefined variable: %s" % name)
 				return (None, None)
 			if VERBOSE > 3: print("Defining: %s = %s"%(name, str(values)))
-			variables[name] = values
+
+			if varmatch.group(2):
+				# dependent variables are tuples with the values, with the dep
+				variables[name] = (values, varmatch.group(2))
+			else:
+				variables[name] = values
 		else:
 			continue
 
@@ -274,8 +279,7 @@ def expand_variables(instr, localvars, gvars):
 		if match:
 			pref = match.group(1)
 			name = match.group(2)
-			ctrlname = match.group(3)
-			suff = match.group(4)
+			suff = match.group(3)
 
 			# resolve variable name
 			if name in localvars:
@@ -286,6 +290,10 @@ def expand_variables(instr, localvars, gvars):
 				# value from output, if there are multiple values
 				# then it is a compound (multivalue) input
 				realvals = gvars[name]
+				print("tmp",tmp)
+				print("name",name)
+				print("realvals",realvals)
+				print("localvars",localvars)
 				if len(realvals) == 1:
 					tmp = pref + realvals[0] + suff
 					inlist.append(tmp)
@@ -783,7 +791,7 @@ class Generator:
 			global variables used to look up values
 
 		"""
-		varre = re.compile('\${\s*([a-zA-Z0-9_.]+)\s*\s*(?:\|?([a-zA-Z0-9_.]+))?\s*}')
+		varre = re.compile('\${\s*([a-zA-Z0-9_.]+)\s*}')
 
 		# produce all the Jobs from inputs/outputs
 		jobs = list()
@@ -812,6 +820,7 @@ class Generator:
 			curout = copy.deepcopy(outputs[ii])
 			localvars = copy.deepcopy(valreal[ii])
 			expvars = []
+			depvars = []
 			change = False
 			# Convert [file, file, file] to [[partial, var, partial], ...]
 			for jj in range(len(curout)):
@@ -822,14 +831,13 @@ class Generator:
 					parscur.append(match.group(0))
 					prevend = match.end()
 					change = True
-					# Find independent variable
 					iv = match.group(1)
-					if match.group(2):
-						iv = match.group(2)
-
-					# independent variable has precedence for expansion
 					if iv in localvars:
 						pass
+					elif iv in gvars and type(gvars[iv]) == type(()):
+						# if this variable depends on another
+						expvars.append(gvars[iv][1]) # expand parent
+						depvars.append(iv) # save this as a dependent variable
 					elif iv in gvars:
 						expvars.append(iv)
 					else:
@@ -841,15 +849,32 @@ class Generator:
 				else:
 					curout[jj] = [curout[jj]]
 
+			# make expansion vars unique and check for higher depth dependencies
+			# which are note allowed
+			expvars = list(set(expvars))
+			for var in expvars:
+				if type(gvars[var]) == type(()):
+					print("Error variable %s is a dependent on variable but "\
+							"depends on %s" % (var, gvars[var][1]))
+
 			# expand variable into list which includes the values from
 			# localvars
-			expvars = list(set(expvars))
 			newlocalvars = []
 			for varset in itertools.product(*[gvars[e] for e in expvars]):
 				newlvar = copy.deepcopy(localvars)
 				for i in range(len(varset)):
 					newlvar[expvars[i]] = varset[i]
 				newlocalvars.append(newlvar)
+
+			# Add variable definitions for all the dependent variables based
+			# on its dependencies, so for EXTRA[SUBJ] = a b c, lookup SUBJ
+			# convert 10588 10659 10844 to indexes
+			for depvar in depvars:
+				depval = gvars[depvar]
+				parentvar = depval[1]
+				parentval = gvars[depval[1]]
+				for varset in newlocalvars:
+					varset[depvar] = depval[0][parentval.index(varset[parentvar])]
 
 			# current set of outputs now has a new set of local vars for every
 			# combination of variables. Currout has already been split based on
@@ -859,27 +884,9 @@ class Generator:
 				for jj in range(len(newout[kk])):
 					for ll in range(len(newout[kk][jj])):
 						m = varre.match(newout[kk][jj][ll])
-						if m and m.group(2):
-							# Figure out the index of the current value in the
-							# global variable
-							ctrlval = newlocalvars[kk][m.group(2)]
-							ind = gvars[m.group(2)].index(ctrlval)
-							# replace dependent variable
-							if m.group(2) not in gvars:
-								raise InputError("genJobs", "Error! Unknown global "
-										" variable reference: %s" % m.group(2))
-							tmp = gvars[m.group(1)]
-							if ind < 0 or ind >= len(tmp):
-								raise InputError("genJobs", "Error! Specified "\
-										"dependent variable with independent of "\
-										"different size!")
-							newlocalvars[kk][m.group(1)] = tmp[ind]
-							newout[kk][jj][ll] = tmp[ind]
-						elif m and m.group(1):
-							# replace just main variable
+						# expand variables
+						if m and m.group(1):
 							newout[kk][jj][ll] = newlocalvars[kk][m.group(1)]
-						else:
-							pass
 					# Re-merge the list to a string
 					newout[kk][jj] = "".join(newout[kk][jj])
 			if change:
