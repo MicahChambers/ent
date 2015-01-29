@@ -2,9 +2,10 @@
 	"variables" : {
 		"BASE":"/ifs/tmp/data/",
 		"SUBJ" : ["10588","10659","10844"],
+		"EXTRA[SUBJ]" : ["a","b","c"],
 		"ALLFUNC" : ["${BASE}/func/"],
 		"ALLSTRUCT" : ["${BASE}/struct/"],
-		"SUBDIR" : ["${BASE}/${SUBJ}/"],
+		"SUBDIR" : ["${BASE}/${SUBJ}/${EXTRA}"],
 		"SUBFUNC" : ["${SUBDIR}/func"],
 		"SUBSTRUCT" : ["${SUBDIR}/struct"],
 		"SCRIPTDIR" : "/ifs/students/mchambers/ent/example/"

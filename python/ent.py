@@ -139,16 +139,27 @@ def parseV2(filename):
 
 	"""
 
+	varre = re.compile('\s*([a-zA-Z0-9_.]+)(?:\[\s*([a-zA-Z0-9_.]+)\s*\])?\s*')
 	variables = dict()
 	jobs = []
 	with open(filename, "r") as f:
 		infile = json.load(f)
 		variables = infile['variables']
 
-		# Check Variables
+		# Check Variable
+		outvariables = {}
 		for kk,vv in variables.items():
 			if type(vv) != type([]):
-				variables[kk] = [vv]
+				vv = [vv]
+
+			m = varre.match(kk)
+			if m.group(2):
+				# there is a dependent variable, indicate in value
+				vv = (vv, m.group(2))
+				kk = m.group(1)
+
+			# Add variable
+			outvariables[kk] = vv
 
 		for g in infile['generators']:
 			inputs = g['inputs']
@@ -164,7 +175,7 @@ def parseV2(filename):
 			jobs.append(Generator(inputs, outputs))
 			jobs[-1].cmds = commands
 
-	return (jobs, variables)
+	return (jobs, outvariables)
 
 def parseV1(filename):
 	"""Reads a file and returns Generators, and variables as a tuple
@@ -533,6 +544,8 @@ class Ent:
 	""" Main Ent Class, all others are derived from this. This stores global
 	variables, all jobs, all files etc.
 
+	This class owns all jobs and files
+
 	Organization:
 	Generator: This is a generic rule of how a particular set of inputs generates
 	a particular set of outputs.
@@ -758,6 +771,7 @@ class Ent:
 		# Identify Files without Generators
 		rootfiles = []
 		for k,v in self.files.items():
+			print("file: ", k, v, v.genr)
 			if v.genr == None:
 				v.finished = True
 				rootfiles.append(k)
@@ -881,8 +895,8 @@ class Generator:
 
 	def genJobs(self, gfiles, gvars):
 		""" The "main" function of Generator is genJobs. It produces a list of
-		Job (with concrete inputs and outputs)
-		and updates files with any newly referenced files. May need global
+		Job classes (with concrete inputs and outputs)
+		and updates files with any newly referenced files. Needs global
 		gvars to resolve file names.
 
 		Parameters
@@ -918,20 +932,16 @@ class Generator:
 				tmp.extend(curin)
 			curins = tmp
 
-			print(self.cmds)
 			# insert finalized invals into curins
 			if self.cmds:
 				cmds = resolve_variables(self.cmds, curvars, gvars)
 			else:
 				cmds = []
-			print(cmds)
 
 			# change curins to list of Files, instead of strings by
 			# finding inputs and outputs in the global files database, and then
 			# pass them in as a list to the new job
 			for ii, name in enumerate(curins):
-				print(curins)
-				print(name)
 				name = str(Path(name))
 				if name in gfiles:
 					curins[ii] = gfiles[name]
@@ -996,12 +1006,12 @@ class Job:
 	status = 'WAITING'
 
 	def __init__(self, inputs, outputs, cmds, parent = None):
-		self.inputs = copy.deepcopy(inputs)
-		self.outputs = copy.deepcopy(outputs)
+		self.inputs = inputs
+		self.outputs = outputs
 		self.parent = parent
 
 		if "".join(cmds) != "":
-			self.cmds = copy.deepcopy(cmds)
+			self.cmds = cmds
 		else:
 			self.cmds = []
 
