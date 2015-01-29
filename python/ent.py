@@ -24,7 +24,6 @@ Main Data Structures:
 	TODO Enforce 1 line per rule (or handle multi-line rules)
 """
 
-## TODO add pipe to output expansion
 ## TODO handle quotes in variable definitions
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
 gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)\s*}(.*)')
@@ -264,17 +263,119 @@ def parseV1(filename):
 
 	return (jobs, variables)
 
+def expand_variables(inlist, localvars, gvars):
+	# This is more complicated than it might seem because
+	# [${SUBJECT} ${SUBJECT}] might exist in the output so a the same
+	# variable should not be expanded twice. To handle this, we need to
+	# create lists of dictionaries of local variables that represent one
+	# expansion
+	varre = re.compile('\${\s*([a-zA-Z0-9_.]+)\s*}')
+
+	if not inlist:
+		return [], []
+
+	# 1) find all variables in outputs
+	# 2) expand each variable into the list of values it takes on
+	# 3) create list of every combination of every list variable as a
+	# dictionary of local variables
+	# 4) repeat on 1) on the expanded outputs
+	ii = 0
+	valreal = [copy.deepcopy(localvars)]
+	outputs = [copy.deepcopy(inlist)]
+	while ii < len(outputs):
+		# Find All Variables, Across Output Files
+		curout = copy.deepcopy(outputs[ii])
+		localvars = copy.deepcopy(valreal[ii])
+		expvars = []
+		depvars = []
+		change = False
+		# Convert [file, file, file] to [[partial, var, partial], ...]
+		for jj in range(len(curout)):
+			print(curout[jj])
+			parscur = []
+			prevend = 0
+			for match in varre.finditer(curout[jj]):
+				parscur.append(curout[jj][prevend:match.start()])
+				parscur.append(match.group(0))
+				prevend = match.end()
+				change = True
+				iv = match.group(1)
+				if iv in localvars:
+					pass
+				elif iv in gvars and type(gvars[iv]) == type(()):
+					# if this variable depends on another
+					expvars.append(gvars[iv][1]) # expand parent
+					depvars.append(iv) # save this as a dependent variable
+				elif iv in gvars:
+					expvars.append(iv)
+				else:
+					raise InputError("genJobs", "Error! Unknown global "
+							" variable reference: %s" % iv)
+			parscur.append(curout[jj][prevend:])
+			if parscur:
+				curout[jj] = [p for p in parscur if p]
+			else:
+				curout[jj] = [curout[jj]]
+
+		# make expansion vars unique and check for higher depth dependencies
+		# which are note allowed
+		expvars = list(set(expvars))
+		for var in expvars:
+			if type(gvars[var]) == type(()):
+				print("Error variable %s is a dependent on variable but "\
+						"depends on %s" % (var, gvars[var][1]))
+
+		# expand variable into list which includes the values from
+		# localvars
+		newlocalvars = []
+		for varset in itertools.product(*[gvars[e] for e in expvars]):
+			newlvar = copy.deepcopy(localvars)
+			for i in range(len(varset)):
+				newlvar[expvars[i]] = varset[i]
+			newlocalvars.append(newlvar)
+
+		# Add variable definitions for all the dependent variables based
+		# on its dependencies, so for EXTRA[SUBJ] = a b c, lookup SUBJ
+		# convert 10588 10659 10844 to indexes
+		for depvar in depvars:
+			depval = gvars[depvar]
+			parentvar = depval[1]
+			parentval = gvars[depval[1]]
+			for varset in newlocalvars:
+				varset[depvar] = depval[0][parentval.index(varset[parentvar])]
+
+		# current set of outputs now has a new set of local vars for every
+		# combination of variables. Currout has already been split based on
+		# variable so just take replace the variables
+		newout = [[copy.deepcopy(j) for j in curout] for i in newlocalvars]
+		for kk in range(len(newout)):
+			for jj in range(len(newout[kk])):
+				for ll in range(len(newout[kk][jj])):
+					m = varre.match(newout[kk][jj][ll])
+					# expand variables
+					if m and m.group(1):
+						newout[kk][jj][ll] = newlocalvars[kk][m.group(1)]
+				# Re-merge the list to a string
+				newout[kk][jj] = "".join(newout[kk][jj])
+		if change:
+			outputs.extend(newout)
+			valreal.extend(newlocalvars)
+			del(outputs[ii])
+			del(valreal[ii])
+		else:
+			ii += 1
+	return outputs, valreal
 
 ## Expand String Based on Local (First) then Global Variables
 # only expands variables that match ${[a-zA-Z0-9_]}
-def expand_variables(instr, localvars, gvars):
-	inlist = [instr]
-
+def resolve_variables(inlist, localvars, gvars):
 	# the expanded version (for instance if there are multi-value)
 	# arguments
-	final_vals = []
-	while len(inlist) > 0:
-		tmp = inlist.pop()
+	ii = 0
+	print("Expanding", inlist, localvars)
+	outlist = copy.deepcopy(inlist)
+	while ii < len(outlist):
+		tmp = outlist[ii]
 		match = gvarre.fullmatch(tmp)
 		if match:
 			pref = match.group(1)
@@ -284,34 +385,26 @@ def expand_variables(instr, localvars, gvars):
 			# resolve variable name
 			if name in localvars:
 				# variable in the list of output vars, just sub in
-				inlist.append(pref + localvars[name] + suff)
+				outlist[ii] = pref + localvars[name] + suff
 			elif name in gvars:
 				# if it is a global variable, then we don't have a
 				# value from output, if there are multiple values
 				# then it is a compound (multivalue) input
 				realvals = gvars[name]
-				print("tmp",tmp)
-				print("name",name)
-				print("realvals",realvals)
-				print("localvars",localvars)
 				if len(realvals) == 1:
 					tmp = pref + realvals[0] + suff
-					inlist.append(tmp)
+					outlist[ii] = tmp
 				else:
-					# multiple values, insert in reverse order,
-					# to make first value in list first to be
-					# resolved in next iteration
-					tmp = [pref + vv + suff for vv in
-							reversed(realvals)]
-					inlist.extend(tmp)
+					raise InputError("resolve_variables", "Error cannot place "
+							"variables length variable in a command")
 			else:
 				raise InputError('expand_string', 'Error, input ' + \
 						'"%s" references variable "%s"' % (instr, name) + \
 						'which is a unknown!')
 		else:
-			final_vals.append(tmp)
+			ii += 1
 
-	return final_vals
+	return outlist
 
 def split_command(instr):
 	quote_re = re.compile(r'((?:(?<!\\)(?:\\\\)*|[^\\]))"')
@@ -477,12 +570,21 @@ class Ent:
 				return -1
 			# Resolve Variable Names in Commands
 			for job in jlist:
+				print("Expanding input/output arguments for \n%s" % str(job))
+				print(job.inputs)
+				print(job.outputs)
+				print(job.cmds)
 				for ii in range(len(job.cmds)):
 					job.cmds[ii] = expand_args(job.cmds[ii], job.inputs, \
 							job.outputs)
 
 			# add jobs to list of jobs
 			self.jobs.extend(jlist)
+
+		if VERBOSE > 6:
+			print("All Jobs: ")
+			for j in self.jobs:
+				print(j)
 
 		##################################################################
 		# Read MD5 State From File, and compare with current MD5s
@@ -774,8 +876,8 @@ class Generator:
 
 	def __init__(self, inputs, outputs):
 		self.cmds = list()
-		self.inputs = inputs
-		self.outputs = outputs
+		self.inputs = copy.deepcopy(inputs)
+		self.outputs = copy.deepcopy(outputs)
 
 	def genJobs(self, gfiles, gvars):
 		""" The "main" function of Generator is genJobs. It produces a list of
@@ -791,8 +893,6 @@ class Generator:
 			global variables used to look up values
 
 		"""
-		varre = re.compile('\${\s*([a-zA-Z0-9_.]+)\s*}')
-
 		# produce all the Jobs from inputs/outputs
 		jobs = list()
 
@@ -802,124 +902,36 @@ class Generator:
 		# store array of dictionaries that produced output paths, so that the
 		# same variables to be reused for inputs
 		valreal = [dict()]
-
-		# This is more complicated than it might seem because
-		# [${SUBJECT} ${SUBJECT}] might exist in the output so a the same
-		# variable should not be expanded twice. To handle this, we need to
-		# create lists of dictionaries of local variables that represent one
-		# expansion
-
-		# 1) find all variables in outputs
-		# 2) expand each variable into the list of values it takes on
-		# 3) create list of every combination of every list variable as a
-		# dictionary of local variables
-		# 4) repeat on 1) on the expanded outputs
-		ii = 0
-		while ii < len(outputs):
-			# Find All Variables, Across Output Files
-			curout = copy.deepcopy(outputs[ii])
-			localvars = copy.deepcopy(valreal[ii])
-			expvars = []
-			depvars = []
-			change = False
-			# Convert [file, file, file] to [[partial, var, partial], ...]
-			for jj in range(len(curout)):
-				parscur = []
-				prevend = 0
-				for match in varre.finditer(curout[jj]):
-					parscur.append(curout[jj][prevend:match.start()])
-					parscur.append(match.group(0))
-					prevend = match.end()
-					change = True
-					iv = match.group(1)
-					if iv in localvars:
-						pass
-					elif iv in gvars and type(gvars[iv]) == type(()):
-						# if this variable depends on another
-						expvars.append(gvars[iv][1]) # expand parent
-						depvars.append(iv) # save this as a dependent variable
-					elif iv in gvars:
-						expvars.append(iv)
-					else:
-						raise InputError("genJobs", "Error! Unknown global "
-								" variable reference: %s" % iv)
-				parscur.append(curout[jj][prevend:])
-				if parscur:
-					curout[jj] = [p for p in parscur if p]
-				else:
-					curout[jj] = [curout[jj]]
-
-			# make expansion vars unique and check for higher depth dependencies
-			# which are note allowed
-			expvars = list(set(expvars))
-			for var in expvars:
-				if type(gvars[var]) == type(()):
-					print("Error variable %s is a dependent on variable but "\
-							"depends on %s" % (var, gvars[var][1]))
-
-			# expand variable into list which includes the values from
-			# localvars
-			newlocalvars = []
-			for varset in itertools.product(*[gvars[e] for e in expvars]):
-				newlvar = copy.deepcopy(localvars)
-				for i in range(len(varset)):
-					newlvar[expvars[i]] = varset[i]
-				newlocalvars.append(newlvar)
-
-			# Add variable definitions for all the dependent variables based
-			# on its dependencies, so for EXTRA[SUBJ] = a b c, lookup SUBJ
-			# convert 10588 10659 10844 to indexes
-			for depvar in depvars:
-				depval = gvars[depvar]
-				parentvar = depval[1]
-				parentval = gvars[depval[1]]
-				for varset in newlocalvars:
-					varset[depvar] = depval[0][parentval.index(varset[parentvar])]
-
-			# current set of outputs now has a new set of local vars for every
-			# combination of variables. Currout has already been split based on
-			# variable so just take replace the variables
-			newout = [[copy.deepcopy(j) for j in curout] for i in newlocalvars]
-			for kk in range(len(newout)):
-				for jj in range(len(newout[kk])):
-					for ll in range(len(newout[kk][jj])):
-						m = varre.match(newout[kk][jj][ll])
-						# expand variables
-						if m and m.group(1):
-							newout[kk][jj][ll] = newlocalvars[kk][m.group(1)]
-					# Re-merge the list to a string
-					newout[kk][jj] = "".join(newout[kk][jj])
-			if change:
-				outputs.extend(newout)
-				valreal.extend(newlocalvars)
-				del(outputs[ii])
-				del(valreal[ii])
-			else:
-				ii += 1
+		outputs, valreal = expand_variables(self.outputs, dict(), gvars)
+		if VERBOSE > 5:
+			print('============ Generating Jobs From =============')
+			print(self.outputs, self.inputs, self.cmds, outputs, valreal)
+			print("Creating...")
 
 		# now that we have expanded the outputs, just need to expand input
 		# and create a job to store each realization of the expansion process
 		for curouts, curvars in zip(outputs, valreal):
-			curins = []
-			cmds = []
-
-			print('============')
-			print(curouts)
-			print(curvars)
 			# for each input, fill in variable values from outputs
-			for inval in self.inputs:
-				# insert finalized invals into curins
-				curins.extend(expand_variables(inval, curvars, gvars))
-			print("New Curins: %s " % str(curins))
+			curins,trash = expand_variables(self.inputs, curvars, gvars)
+			tmp = []
+			for curin in curins:
+				tmp.extend(curin)
+			curins = tmp
 
-			for cmd in self.cmds:
-				# insert finalized invals into curins
-				cmds.extend(expand_variables(cmd, curvars, gvars))
+			print(self.cmds)
+			# insert finalized invals into curins
+			if self.cmds:
+				cmds = resolve_variables(self.cmds, curvars, gvars)
+			else:
+				cmds = []
+			print(cmds)
 
 			# change curins to list of Files, instead of strings by
 			# finding inputs and outputs in the global files database, and then
 			# pass them in as a list to the new job
 			for ii, name in enumerate(curins):
+				print(curins)
+				print(name)
 				name = str(Path(name))
 				if name in gfiles:
 					curins[ii] = gfiles[name]
@@ -938,16 +950,17 @@ class Generator:
 					gfiles[name] = curouts[ii]
 
 			# append Job to list of jobs
-			oring = Job(curins, curouts, cmds, self)
-			print("Checking Generator")
-			for out in curouts:
-				print(out.genr)
-			if VERBOSE > 2: print("New Job:%s"% str(oring))
+			newjob = Job(curins, curouts, cmds, self)
+			if VERBOSE > 2: print("New Job:%s"% str(newjob))
 
 			# append job to list of jobs
-			jobs.append(oring)
+			jobs.append(newjob)
 
 		# find external files referenced as inputs
+		if VERBOSE > 5:
+			print("New Jobs")
+			for j in jobs:
+				print(j)
 		return jobs
 
 	def __str__(self):
@@ -983,12 +996,12 @@ class Job:
 	status = 'WAITING'
 
 	def __init__(self, inputs, outputs, cmds, parent = None):
-		self.inputs = inputs
-		self.outputs = outputs
+		self.inputs = copy.deepcopy(inputs)
+		self.outputs = copy.deepcopy(outputs)
 		self.parent = parent
 
 		if "".join(cmds) != "":
-			self.cmds = cmds
+			self.cmds = copy.deepcopy(cmds)
 		else:
 			self.cmds = []
 
