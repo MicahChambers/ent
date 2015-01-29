@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import argparse
+import shlex
 import os, time
 import itertools
 import re
@@ -256,7 +257,7 @@ def parseV1(filename):
 		elif varmatch:
 			# split variables
 			name = varmatch.group(1)
-			values = re.split("\s+", varmatch.group(3))
+			values = shlex.split(varmatch.group(3))
 			if name in variables:
 				print("Error! Redefined variable: %s" % name)
 				return (None, None)
@@ -416,62 +417,6 @@ def resolve_variables(inlist, localvars, gvars):
 			ii += 1
 
 	return outlist
-
-def split_command(instr):
-	quote_re = re.compile(r'((?:(?<!\\)(?:\\\\)*|[^\\]))"')
-
-	##################################
-	# Split up Quoted Regions
-	##################################
-	spl = []
-	start = 0
-	quote = False
-	for m in quote_re.finditer(instr):
-		prev = 0
-		if quote:
-			# if we are in a quote then stop at end of match
-			spl.append(instr[start:m.end()])
-			start = m.end()
-		else:
-			# otherwise stop at end-1
-			spl.append(instr[start:m.end()-1])
-			start = m.end()-1
-		quote = not quote
-
-		# if the command has a quote (that is preceed by an even number of
-		# back slashes) then start quote
-
-	if quote:
-		raise "Error, unmatched quotes in input!"
-	else:
-		spl.append(instr[start:])
-
-	##################################
-	# Split Unquoted Regions on space
-	##################################
-	newspl = []
-	currword = ""
-	for word in spl:
-		if not word:
-			continue
-
-		# Keep Entire quoted string together
-		if word[0] == '"':
-			if word[-1] != '"':
-				raise "ERROR PARSING"
-			currword += word[1:-1]
-			print('updated currword: "%s"' % currword)
-		else:
-			tmp = re.split('\s+', word)
-			if currword:
-				tmp[0] = currword + tmp[0]
-				currword = ""
-			newspl.extend(tmp)
-
-	if currword:
-		newspl.append(currword)
-
-	return [s for s in newspl if s]
 
 ##
 # @brief Parses a string with ${<} type syntax with the contents of
@@ -685,7 +630,7 @@ class Ent:
 				cmd = job.cmdqueue.pop(0)
 				if VERBOSE > 1:
 					print("Submitting Job:\n%s " % str(cmd))
-				cmd = split_command(cmd)
+				cmd = shlex.split(cmd)
 				template.remoteCommand = cmd[0]
 				template.args = cmd[1:]
 				job.running_cmd = [template.remoteCommand]+template.args
