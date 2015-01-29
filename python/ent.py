@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
-import drmaa
 import argparse
 import os, time
+import itertools
 import re
 import copy
 import sys
@@ -27,9 +27,27 @@ Main Data Structures:
 ## TODO add pipe to output expansion
 ## TODO handle quotes in variable definitions
 md5re = re.compile('([0-9]{32})  (.*)|md5sum: (.*)')
-gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)\s*}(.*)')
+gvarre = re.compile('(.*?)\${\s*([a-zA-Z0-9_.]+)?(\|[a-zA-Z0-9_.]+)?\s*}(.*)')
 
 VERBOSE=10
+
+decodestatus = {}
+
+def initdrmaa():
+		import drmaa
+		global decodestatus
+		decodestatus = {
+			drmaa.JobState.UNDETERMINED: 'process status cannot be determined',
+			drmaa.JobState.QUEUED_ACTIVE: 'job is queued and active',
+			drmaa.JobState.SYSTEM_ON_HOLD: 'job is queued and in system hold',
+			drmaa.JobState.USER_ON_HOLD: 'job is queued and in user hold',
+			drmaa.JobState.USER_SYSTEM_ON_HOLD: 'job is queued and in user and system hold',
+			drmaa.JobState.RUNNING: 'job is running',
+			drmaa.JobState.SYSTEM_SUSPENDED: 'job is system suspended',
+			drmaa.JobState.USER_SUSPENDED: 'job is user suspended',
+			drmaa.JobState.DONE: 'job finished normally',
+			drmaa.JobState.FAILED: 'job finished, but failed',
+		}
 
 def main():
 	parser = argparse.ArgumentParser(description='Run ENT on an ent script')
@@ -42,13 +60,19 @@ def main():
 
 	args = parser.parse_args()
 
-	statename = args.state[0]
+	if args.state:
+		statename = args.state[0]
+	else:
+		statename = None
+
 	entobj = Ent(args.script, statename)
+
 	if args.simulate:
 		entobj.simulate()
 	else:
 		try:
 			entobj.run()
+			initdrmaa()
 		except:
 			e = sys.exc_info()[0]
 			print("Error: %s" % e )
@@ -59,20 +83,6 @@ def main():
 				json.dump(sums, of, indent=1)
 		except IOError as e:
 			print("I/O error({0}): {1}".format(e.errno, e.strerror))
-
-decodestatus = {
-	drmaa.JobState.UNDETERMINED: 'process status cannot be determined',
-	drmaa.JobState.QUEUED_ACTIVE: 'job is queued and active',
-	drmaa.JobState.SYSTEM_ON_HOLD: 'job is queued and in system hold',
-	drmaa.JobState.USER_ON_HOLD: 'job is queued and in user hold',
-	drmaa.JobState.USER_SYSTEM_ON_HOLD: 'job is queued and in user and system hold',
-	drmaa.JobState.RUNNING: 'job is running',
-	drmaa.JobState.SYSTEM_SUSPENDED: 'job is system suspended',
-	drmaa.JobState.USER_SUSPENDED: 'job is user suspended',
-	drmaa.JobState.DONE: 'job finished normally',
-	drmaa.JobState.FAILED: 'job finished, but failed',
-	}
-
 
 class InputError(Exception):
 	"""Exception raised for errors in the input.
@@ -264,7 +274,8 @@ def expand_variables(instr, localvars, gvars):
 		if match:
 			pref = match.group(1)
 			name = match.group(2)
-			suff = match.group(3)
+			ctrlname = match.group(3)
+			suff = match.group(4)
 
 			# resolve variable name
 			if name in localvars:
@@ -600,7 +611,10 @@ class Ent:
 		# Identify Files without Generators
 		rootfiles = []
 		for k,v in self.files.items():
+			print(k)
+			print(v)
 			if v.genr == None:
+				print("no generator")
 				v.finished = True
 				rootfiles.append(k)
 
@@ -630,7 +644,6 @@ class Ent:
 				f.write('\n')
 
 	def simulate(self, statefile = None):
-		print("May need to incorporate statefile...")
 
 		# Identify Files without Generators
 		rootfiles = []
@@ -756,7 +769,6 @@ class Generator:
 		self.inputs = inputs
 		self.outputs = outputs
 
-
 	def genJobs(self, gfiles, gvars):
 		""" The "main" function of Generator is genJobs. It produces a list of
 		Job (with concrete inputs and outputs)
@@ -771,6 +783,7 @@ class Generator:
 			global variables used to look up values
 
 		"""
+		varre = re.compile('\${\s*([a-zA-Z0-9_.]+)\s*\s*(?:\|?([a-zA-Z0-9_.]+))?\s*}')
 
 		# produce all the Jobs from inputs/outputs
 		jobs = list()
@@ -782,75 +795,100 @@ class Generator:
 		# same variables to be reused for inputs
 		valreal = [dict()]
 
-		# First Expand All Variables in outputs, for instance if there is a
-		# variable in the output and the variable referrs to an array, that
-		# produces mulitiple outputs
-		while True:
-			# outer list realization of set of outputs (list)
-			prevout = outputs
-			match = None
-			oii = None
-			ii = 0
-			for outs in outputs:
-				for out in outs:
+		# This is more complicated than it might seem because
+		# [${SUBJECT} ${SUBJECT}] might exist in the output so a the same
+		# variable should not be expanded twice. To handle this, we need to
+		# create lists of dictionaries of local variables that represent one
+		# expansion
 
-					# find a variable
-					match = gvarre.fullmatch(out)
-					if match:
-						oii = ii
-						ii = len(outputs)
-						break;
+		# 1) find all variables in outputs
+		# 2) expand each variable into the list of values it takes on
+		# 3) create list of every combination of every list variable as a
+		# dictionary of local variables
+		# 4) repeat on 1) on the expanded outputs
+		ii = 0
+		while ii < len(outputs):
+			# Find All Variables, Across Output Files
+			curout = copy.deepcopy(outputs[ii])
+			localvars = copy.deepcopy(valreal[ii])
+			expvars = []
+			change = False
+			# Convert [file, file, file] to [[partial, var, partial], ...]
+			for jj in range(len(curout)):
+				parscur = []
+				prevend = 0
+				for match in varre.finditer(curout[jj]):
+					parscur.append(curout[jj][prevend:match.start()])
+					parscur.append(match.group(0))
+					prevend = match.end()
+					change = True
+					# Find independent variable
+					iv = match.group(1)
+					if match.group(2):
+						iv = match.group(2)
 
-				ii = ii+1
-				if ii >= len(outputs):
-					break;
+					# independent variable has precedence for expansion
+					if iv in localvars:
+						pass
+					elif iv in gvars:
+						expvars.append(iv)
+					else:
+						raise InputError("genJobs", "Error! Unknown global "
+								" variable reference: %s" % iv)
+				parscur.append(curout[jj][prevend:])
+				if parscur:
+					curout[jj] = [p for p in parscur if p]
+				else:
+					curout[jj] = [curout[jj]]
 
-			# no matches in any of the outputs, break
-			if not match:
-				break
+			# expand variable into list which includes the values from
+			# localvars
+			expvars = list(set(expvars))
+			newlocalvars = []
+			for varset in itertools.product(*[gvars[e] for e in expvars]):
+				newlvar = copy.deepcopy(localvars)
+				for i in range(len(varset)):
+					newlvar[expvars[i]] = varset[i]
+				newlocalvars.append(newlvar)
 
-			# TODO add pipe syntax here
-			pref = match.group(1)
-			vname = match.group(2)
-			suff = match.group(3)
-			if vname not in gvars:
-				raise InputError("genJobs", "Error! Unknown global variable "
-						"reference: %s" % vname)
-
-			subre = re.compile('\${\s*'+vname+'\s*}')
-
-			# we already have a value for this, just use that
-			if vname in valreal[oii]:
-				vv = valreal[oii][vname]
-
-				# perform replacement in all the gvars
-				for ojj in range(len(outputs[oii])):
-					outputs[oii][ojj] = subre.sub(vv, outputs[oii][ojj])
-
-				# restart expansion process in case of references in the
-				# expanded value
-				continue
-
-			# no previous match, go ahead and expand
-			values = gvars[vname]
-
-			# save and remove matching realization
-			outs = outputs[oii]
-			del outputs[oii]
-			varprev = valreal[oii]
-			del valreal[oii]
-
-			for vv in values:
-				newouts = []
-				newvar = copy.deepcopy(varprev)
-				newvar[vname] = vv
-
-				# perform replacement in all the gvars
-				for out in outs:
-					newouts.append(subre.sub(vv, out))
-
-				outputs.append(newouts)
-				valreal.append(newvar)
+			# current set of outputs now has a new set of local vars for every
+			# combination of variables. Currout has already been split based on
+			# variable so just take replace the variables
+			newout = [[copy.deepcopy(j) for j in curout] for i in newlocalvars]
+			for kk in range(len(newout)):
+				for jj in range(len(newout[kk])):
+					for ll in range(len(newout[kk][jj])):
+						m = varre.match(newout[kk][jj][ll])
+						if m and m.group(2):
+							# Figure out the index of the current value in the
+							# global variable
+							ctrlval = newlocalvars[kk][m.group(2)]
+							ind = gvars[m.group(2)].index(ctrlval)
+							# replace dependent variable
+							if m.group(2) not in gvars:
+								raise InputError("genJobs", "Error! Unknown global "
+										" variable reference: %s" % m.group(2))
+							tmp = gvars[m.group(1)]
+							if ind < 0 or ind >= len(tmp):
+								raise InputError("genJobs", "Error! Specified "\
+										"dependent variable with independent of "\
+										"different size!")
+							newlocalvars[kk][m.group(1)] = tmp[ind]
+							newout[kk][jj][ll] = tmp[ind]
+						elif m and m.group(1):
+							# replace just main variable
+							newout[kk][jj][ll] = newlocalvars[kk][m.group(1)]
+						else:
+							pass
+					# Re-merge the list to a string
+					newout[kk][jj] = "".join(newout[kk][jj])
+			if change:
+				outputs.extend(newout)
+				valreal.extend(newlocalvars)
+				del(outputs[ii])
+				del(valreal[ii])
+			else:
+				ii += 1
 
 		# now that we have expanded the outputs, just need to expand input
 		# and create a job to store each realization of the expansion process
@@ -858,10 +896,14 @@ class Generator:
 			curins = []
 			cmds = []
 
+			print('============')
+			print(curouts)
+			print(curvars)
 			# for each input, fill in variable values from outputs
 			for inval in self.inputs:
 				# insert finalized invals into curins
 				curins.extend(expand_variables(inval, curvars, gvars))
+			print("New Curins: %s " % str(curins))
 
 			for cmd in self.cmds:
 				# insert finalized invals into curins
@@ -890,6 +932,9 @@ class Generator:
 
 			# append Job to list of jobs
 			oring = Job(curins, curouts, cmds, self)
+			print("Checking Generator")
+			for out in curouts:
+				print(out.genr)
 			if VERBOSE > 2: print("New Job:%s"% str(oring))
 
 			# append job to list of jobs
